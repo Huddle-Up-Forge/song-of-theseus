@@ -23,7 +23,7 @@ This is a Windows-oriented local application. Read [LOCAL_WINDOWS.md](LOCAL_WIND
 1. Clone this repository and place the official Plus checkout beside it at `../YingMusic-Singer-Plus`:
 
    ```powershell
-   git clone https://github.com/YOUR_ORGANIZATION/song-of-theseus.git
+   git clone https://github.com/Huddle-Up-Forge/song-of-theseus.git
    git clone https://github.com/ASLP-lab/YingMusic-Singer-Plus.git ..\YingMusic-Singer-Plus
    ```
 

@@ -23,7 +23,7 @@
 1. 複製本儲存庫，並將官方 Plus 專案放到本儲存庫旁邊的 `../YingMusic-Singer-Plus`：
 
    ```powershell
-   git clone https://github.com/YOUR_ORGANIZATION/song-of-theseus.git
+   git clone https://github.com/Huddle-Up-Forge/song-of-theseus.git
    git clone https://github.com/ASLP-lab/YingMusic-Singer-Plus.git ..\YingMusic-Singer-Plus
    ```
 
