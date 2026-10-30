@@ -483,6 +483,7 @@ class TaskScheduler:
         project["last_generation"] = {
             "path": str(final_path),
             "steps": int(payload["steps"]),
+            "pitch_shift": int(payload["pitch_shift"]),
             "changed_lines": generated_count,
             "created_at": _now(),
         }
@@ -546,6 +547,7 @@ class TaskScheduler:
         project["last_generation"] = {
             "path": str(final_path),
             "steps": int(payload["steps"]),
+            "pitch_shift": int(payload["pitch_shift"]),
             "changed_lines": generated_count,
             "created_at": _now(),
         }
@@ -612,6 +614,7 @@ class TaskScheduler:
             payload["lyrics"],
             int(payload["steps"]),
             lambda fraction, label: self._progress(task["id"], fraction, label),
+            int(payload.get("pitch_shift", 0)),
         )
         project.setdefault("latest_previews", {})[str(payload["index"])] = {
             "path": path.name,
@@ -636,6 +639,7 @@ class TaskScheduler:
             payload["chunks"],
             int(payload["steps"]),
             lambda fraction, label: self._progress(task["id"], fraction, label),
+            int(payload.get("pitch_shift", 0)),
         )
         project.setdefault("latest_previews", {})[str(payload["index"])] = {
             "path": path.name,
@@ -690,6 +694,7 @@ class TaskScheduler:
             int(payload["steps"]),
             run_dir,
             on_progress,
+            int(payload.get("pitch_shift", 0)),
         )
         _update_job(
             task["id"],
@@ -744,6 +749,7 @@ class TaskScheduler:
         project["last_generation"] = {
             "path": str(final_path),
             "steps": manifest["steps"],
+            "pitch_shift": manifest.get("pitch_shift", 0),
             "changed_lines": len(manifest["changed"]),
             "created_at": _now(),
         }
@@ -812,6 +818,7 @@ class PreviewRequest(BaseModel):
     index: int = Field(ge=0)
     lyrics: str = Field(min_length=1, max_length=500)
     steps: int = Field(default=32, ge=8, le=64, multiple_of=4)
+    pitch_shift: int = Field(default=0, ge=-12, le=12)
 
 
 class AlignedPreviewChunk(BaseModel):
@@ -824,11 +831,13 @@ class AlignedPreviewRequest(BaseModel):
     index: int = Field(ge=0)
     chunks: list[AlignedPreviewChunk] = Field(min_length=2, max_length=16)
     steps: int = Field(default=32, ge=8, le=64, multiple_of=4)
+    pitch_shift: int = Field(default=0, ge=-12, le=12)
 
 
 class GenerateRequest(BaseModel):
     lines: list[LineEdit]
     steps: int = Field(default=32, ge=8, le=64, multiple_of=4)
+    pitch_shift: int = Field(default=0, ge=-12, le=12)
 
 
 class TimingUpdate(BaseModel):
@@ -1088,6 +1097,7 @@ def _public_midi_project(project: dict[str, Any]) -> dict[str, Any]:
         "last_generation": (
             {
                 "steps": last_generation.get("steps"),
+                "pitch_shift": last_generation.get("pitch_shift", 0),
                 "changed_lines": last_generation.get("changed_lines"),
                 "created_at": last_generation.get("created_at"),
             }
@@ -1572,6 +1582,7 @@ def get_project(project_id: str) -> dict[str, Any]:
         "last_generation": (
             {
                 "steps": last_generation.get("steps"),
+                "pitch_shift": last_generation.get("pitch_shift", 0),
                 "changed_lines": last_generation.get("changed_lines"),
                 "created_at": last_generation.get("created_at"),
             }
@@ -1797,7 +1808,12 @@ def request_preview(project_id: str, request: PreviewRequest) -> dict[str, Any]:
     job_id = _create_job(
         project_id,
         "preview",
-        {"index": request.index, "lyrics": request.lyrics.strip(), "steps": request.steps},
+        {
+            "index": request.index,
+            "lyrics": request.lyrics.strip(),
+            "steps": request.steps,
+            "pitch_shift": request.pitch_shift,
+        },
         priority=0,
         label=f"等待试听第 {request.index + 1} 句",
     )
@@ -1838,7 +1854,12 @@ def request_aligned_preview(project_id: str, request: AlignedPreviewRequest) -> 
     job_id = _create_job(
         project_id,
         "aligned_preview",
-        {"index": request.index, "chunks": chunks, "steps": request.steps},
+        {
+            "index": request.index,
+            "chunks": chunks,
+            "steps": request.steps,
+            "pitch_shift": request.pitch_shift,
+        },
         priority=0,
         label=f"等待按音节分组试听第 {request.index + 1} 句",
     )
@@ -1877,7 +1898,12 @@ def request_song_generation(project_id: str, request: GenerateRequest) -> dict[s
     run_id = uuid.uuid4().hex
     run_dir = Path(project["session_dir"]) / "generations" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"run_id": run_id, "steps": request.steps, "changed": changed}
+    manifest = {
+        "run_id": run_id,
+        "steps": request.steps,
+        "pitch_shift": request.pitch_shift,
+        "changed": changed,
+    }
     (run_dir / "request.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     for line in request.lines:
         project["segments"][line.index]["edited"] = line.text
@@ -1902,6 +1928,7 @@ def request_song_generation(project_id: str, request: GenerateRequest) -> dict[s
                 "index": item["index"],
                 "lyrics": item["lyrics"],
                 "steps": request.steps,
+                "pitch_shift": request.pitch_shift,
                 "position": position,
                 "total": len(changed),
             },

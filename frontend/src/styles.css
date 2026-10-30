@@ -381,6 +381,14 @@ audio { accent-color: #ae97ff; }
 @keyframes equalize { from { transform: scaleY(.4); opacity: .5; } to { transform: scaleY(1); opacity: 1; } }
 .player-card .audio-player-inspector { margin: 0 6px 6px; }
 .player-wait { min-height: 39px; display: flex; justify-content: center; align-items: center; gap: 6px; color: #767789; font-size: 8px; }
+.pitch-control { margin-top: 12px; padding: 10px 11px 9px; border: 1px solid rgba(170,149,255,.12); border-radius: 9px; background: linear-gradient(135deg, rgba(139,112,255,.055), rgba(255,255,255,.012)); }
+.pitch-control label { display: flex; justify-content: space-between; align-items: baseline; color: #9a98aa; font-size: 8px; }
+.pitch-control label b { color: #c3b2ff; font: 13px var(--mono); }
+.pitch-control label small { color: #777789; font: 7px var(--mono); }
+.pitch-control input { width: 100%; height: 3px; margin: 11px 0 7px; accent-color: #ad97ff; cursor: pointer; }
+.pitch-control input:disabled { cursor: wait; opacity: .55; }
+.pitch-control .range-captions { font: 7px var(--mono); }
+.pitch-control > small { display: block; margin-top: 7px; color: #717283; font-size: 7px; line-height: 1.5; }
 .inspector-help { display: flex; gap: 6px; align-items: start; margin-top: 10px; color: #747587; font-size: 8px; line-height: 1.55; }
 .help-dot { display: grid; place-items: center; width: 12px; height: 12px; flex-shrink: 0; border: 1px solid #656578; border-radius: 50%; font: 8px Georgia; color: #8a8b9a; }
 .preview-status { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; color: #a99cff; font-size: 8px; }

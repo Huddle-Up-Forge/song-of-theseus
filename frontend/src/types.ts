@@ -31,7 +31,7 @@ export type Project = {
   duration: number;
   segments: Segment[];
   created_at: string;
-  last_generation: { steps: number; changed_lines: number; created_at: string } | null;
+  last_generation: { steps: number; pitch_shift?: number; changed_lines: number; created_at: string } | null;
   latest_previews: Record<string, { lyrics: string; created_at: string }>;
   jobs: Job[];
 };

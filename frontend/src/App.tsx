@@ -142,6 +142,7 @@ function App() {
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [steps, setSteps] = useState(32);
+  const [pitchShift, setPitchShift] = useState(0);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [lrcFile, setLrcFile] = useState<File | null>(null);
   const [lrcText, setLrcText] = useState('');
@@ -655,7 +656,7 @@ function App() {
     setError('');
     setSelectedIndex(index);
     try {
-      const result = await api.preview(project.id, index, line.edited, steps);
+      const result = await api.preview(project.id, index, line.edited, steps, pitchShift);
       setPreviewJobs((current) => ({ ...current, [index]: { id: result.job_id, project_id: project.id, parent_id: null, kind: 'preview', status: 'queued', progress: 0, label: '进入试听队列', error: null, result: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }));
       setComparison({ index, mode: 'generated', src: '', autoPlay: true });
       connectJob(result.job_id, project.id, index);
@@ -672,6 +673,7 @@ function App() {
         project.id,
         project.segments.map((line, index) => ({ index, text: line.edited })),
         steps,
+        pitchShift,
       );
       setActiveJob({ id: result.job_id, project_id: project.id, parent_id: null, kind: 'generate_song', status: 'queued', progress: 0, label: `等待 GPU 队列 · 0/${result.changed_lines} 句`, error: null, result: null, line_count: result.changed_lines, lines_done: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
       connectJob(result.job_id, project.id);
@@ -852,7 +854,7 @@ function App() {
                     </section>
 
                     {activeJob?.kind === 'generate_song' && <JobBanner job={activeJob} onCancel={cancelGeneration} />}
-                    {hasGeneratedSong && <section className="panel final-panel"><div className="final-icon"><Check size={19} /></div><div className="final-title"><span className="micro-label">FINAL MASTER · {project.last_generation?.steps} STEPS</span><b>整曲已完成</b><small>{project.last_generation?.changed_lines} 句重唱 · WAV / 44.1 kHz</small></div><AudioPlayer src={`${projectAsset(project.id, 'final')}?v=${project.last_generation?.created_at}`} durationHint={project.duration} label="整曲成品" variant="master" /><a className="button button-download" href={projectAsset(project.id, 'final')} download><Download size={16} />下载 WAV</a></section>}
+                    {hasGeneratedSong && <section className="panel final-panel"><div className="final-icon"><Check size={19} /></div><div className="final-title"><span className="micro-label">FINAL MASTER · {project.last_generation?.steps} STEPS</span><b>整曲已完成</b><small>{project.last_generation?.changed_lines} 句重唱{project.last_generation?.pitch_shift ? ` · 旋律 ${project.last_generation.pitch_shift > 0 ? '+' : ''}${project.last_generation.pitch_shift} 半音` : ''} · WAV / 44.1 kHz</small></div><AudioPlayer src={`${projectAsset(project.id, 'final')}?v=${project.last_generation?.created_at}`} durationHint={project.duration} label="整曲成品" variant="master" /><a className="button button-download" href={projectAsset(project.id, 'final')} download><Download size={16} />下载 WAV</a></section>}
                   </div>
 
                   <aside className="inspector">
@@ -862,6 +864,12 @@ function App() {
                         <div className="selected-line-card"><span className="micro-label">LINE {(selectedIndex + 1).toString().padStart(2, '0')} · {formatClock(selectedLine.start)}—{formatClock(selectedLine.end)}</span><b>{selectedLine.edited || '未填写歌词'}</b><small>原句：{selectedLine.original}</small></div>
                         <div className="compare-switch"><button className={comparison?.mode !== 'generated' ? 'compare-active' : ''} onClick={() => playOriginal(selectedIndex)}><AudioLines size={14} />原唱</button><button className={comparison?.mode === 'generated' ? 'compare-active compare-new' : ''} onClick={() => void requestLinePreview(selectedIndex)} disabled={previewJob?.status === 'queued' || previewJob?.status === 'running'} title="重新生成这句并在完成后播放"><WandSparkles size={14} />替换试听{previewJob?.status === 'running' || previewJob?.status === 'queued' ? <LoaderCircle size={13} className="spin" /> : null}</button></div>
                         <div className="player-card"><div className={`player-art ${comparison?.mode === 'generated' ? 'player-art-new' : ''}`}><div className="player-eq">{Array.from({ length: 20 }, (_, index) => <i key={index} style={{ height: `${12 + ((index * 17 + selectedIndex * 7) % 31)}px` }} />)}</div><span>{comparison?.mode === 'generated' ? 'RE-SUNG TAKE' : 'ORIGINAL TAKE'}</span></div>{comparison?.src ? <AudioPlayer key={comparison.src} src={comparison.src} durationHint={selectedLine.end - selectedLine.start} label={comparison.mode === 'generated' ? '重唱试听' : '原唱试听'} variant="inspector" autoPlay={Boolean(comparison.autoPlay)} /> : <div className="player-wait">{previewJob?.status === 'running' || previewJob?.status === 'queued' ? <><LoaderCircle size={15} className="spin" />{previewJob.label}</> : <>点上方按钮开始试听</>}</div>}</div>
+                        <div className="pitch-control">
+                          <label htmlFor="pitch-shift-range"><span>重唱旋律移调</span><b>{pitchShift > 0 ? `+${pitchShift}` : pitchShift}<small> 半音</small></b></label>
+                          <input id="pitch-shift-range" type="range" min="-12" max="12" step="1" value={pitchShift} onChange={(event) => setPitchShift(Number(event.target.value))} disabled={generationBusy || previewBusy} />
+                          <div className="range-captions"><span>−12</span><span>低一个八度可试 +12</span><span>+12</span></div>
+                          <small>只调整生成旋律，原曲伴奏不变；试听与整曲共用此设置。</small>
+                        </div>
                         <div className="inspector-help"><span className="help-dot">i</span>{comparison?.mode === 'generated' ? '替换试听会重新生成这一句，完成后自动播放。' : '点击原唱后直接播放源文件中的对应句。'}</div>
                         {previewJob && <div className={`preview-status ${previewJob.status}`}><span>{statusLabel(previewJob.status)}</span><small>{previewJob.label}</small>{previewJob.status === 'failed' && <small>{previewJob.error}</small>}</div>}
                       </> : <div className="inspector-empty"><Headphones size={26} /><b>选一句歌词开始试听</b><span>逐句听原唱与重唱的差异</span></div>}

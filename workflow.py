@@ -907,6 +907,7 @@ def _generate_vocal_segment(
     end_override: float | None = None,
     seed_offset: int = 0,
     melody_path_override: Path | None = None,
+    pitch_shift: int = 0,
 ) -> np.ndarray:
     if not lyrics.strip():
         raise WorkflowError("修改后的歌词不能为空。")
@@ -914,6 +915,8 @@ def _generate_vocal_segment(
         raise WorkflowError("请选择有效的歌词行。")
     if steps < 8 or steps > 64 or steps % 4:
         raise WorkflowError("推理步数必须为 8 到 64 之间、且为 4 的倍数。")
+    if pitch_shift < -12 or pitch_shift > 12:
+        raise WorkflowError("旋律移调必须在 -12 到 +12 个半音之间。")
 
     segment = project["segments"][index]
     segment_start = float(segment["start"] if start_override is None else start_override)
@@ -933,6 +936,16 @@ def _generate_vocal_segment(
         melody_segment = vocals_file.read(target_length, dtype="float32", always_2d=True)
     if melody_segment.shape[0] < int(0.3 * DEMUCS_SAMPLE_RATE):
         raise WorkflowError(f"第 {index + 1} 句太短，请检查 LRC 时间戳。")
+    if pitch_shift:
+        guide = torch.from_numpy(melody_segment.T.copy())
+        guide = torchaudio.functional.pitch_shift(
+            guide,
+            sample_rate=DEMUCS_SAMPLE_RATE,
+            n_steps=int(pitch_shift),
+        )
+        if guide.shape[-1] < target_length:
+            guide = torch.nn.functional.pad(guide, (0, target_length - guide.shape[-1]))
+        melody_segment = guide[..., :target_length].numpy().T.astype(np.float32, copy=False)
     sf.write(melody_path, melody_segment, DEMUCS_SAMPLE_RATE, subtype="PCM_16")
 
     if progress:
@@ -958,6 +971,7 @@ def generate_aligned_preview(
     chunks: list[dict[str, Any]],
     steps: int,
     progress: Callable[[float, str], None],
+    pitch_shift: int = 0,
 ) -> Path:
     """Generate a preview from user-aligned lyric chunks within one source line."""
     if index < 0 or index >= len(project["segments"]):
@@ -1003,6 +1017,7 @@ def generate_aligned_preview(
             end_override=end,
             seed_offset=chunk_index * 997,
             melody_path_override=work_dir / f"chunk_{chunk_index + 1:02d}.wav",
+            pitch_shift=pitch_shift,
         )
         copy_length = min(len(generated), target_length - output_offset)
         voice[output_offset : output_offset + copy_length] += generated[:copy_length]
@@ -1042,8 +1057,11 @@ def generate_preview(
     lyrics: str,
     steps: int,
     progress: Callable[[float, str], None],
+    pitch_shift: int = 0,
 ) -> Path:
-    generated = _generate_vocal_segment(project, index, lyrics, steps, progress)
+    generated = _generate_vocal_segment(
+        project, index, lyrics, steps, progress, pitch_shift=pitch_shift
+    )
     segment = project["segments"][index]
     start = int(segment["start"] * DEMUCS_SAMPLE_RATE)
     end = int(segment["end"] * DEMUCS_SAMPLE_RATE)
@@ -1064,8 +1082,11 @@ def generate_line_chunk(
     steps: int,
     output_dir: Path,
     progress: Callable[[float, str], None],
+    pitch_shift: int = 0,
 ) -> Path:
-    generated = _generate_vocal_segment(project, index, lyrics, steps, progress)
+    generated = _generate_vocal_segment(
+        project, index, lyrics, steps, progress, pitch_shift=pitch_shift
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / f"line_{index + 1:04d}.npy"
     temporary = output.with_suffix(".npy.tmp")

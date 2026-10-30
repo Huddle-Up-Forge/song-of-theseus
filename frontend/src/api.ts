@@ -90,17 +90,17 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ starts, ends }),
     }),
-  preview: (id: string, index: number, lyrics: string, steps: number) =>
+  preview: (id: string, index: number, lyrics: string, steps: number, pitchShift: number) =>
     request<{ job_id: string; status: string }>(`/api/projects/${id}/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index, lyrics, steps }),
+      body: JSON.stringify({ index, lyrics, steps, pitch_shift: pitchShift }),
     }),
-  generate: (id: string, lines: { index: number; text: string }[], steps: number) =>
+  generate: (id: string, lines: { index: number; text: string }[], steps: number, pitchShift: number) =>
     request<{ job_id: string; status: string; changed_lines: number }>(`/api/projects/${id}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lines, steps }),
+      body: JSON.stringify({ lines, steps, pitch_shift: pitchShift }),
     }),
   cancel: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: 'POST' }),
 };
