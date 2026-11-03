@@ -421,6 +421,7 @@ class TaskScheduler:
             singer_profile=payload.get("singer_profile"),
         )
         project["created_at"] = payload.get("created_at")
+        project["title"] = payload.get("title") or project.get("title") or Path(project["original_path"]).stem
         _save_project(project)
         _update_project_status(project_id, "ready")
         _update_job(
@@ -845,6 +846,21 @@ class TimingUpdate(BaseModel):
     ends: list[float] | None = Field(default=None, min_length=1, max_length=1000)
 
 
+class LyricsLineInput(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    original: str = Field(default="", max_length=500)
+    edited: str = Field(default="", max_length=500)
+
+
+class LyricsLinesUpdate(BaseModel):
+    lines: list[LyricsLineInput] = Field(max_length=1000)
+
+
+class WorkspaceRename(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+
+
 class SingerSelection(BaseModel):
     singer_id: str | None = None
 
@@ -873,7 +889,8 @@ class MidiGenerateRequest(BaseModel):
 
 
 class LyricsDraftUpdate(BaseModel):
-    lyrics: list[str] = Field(min_length=1, max_length=1000)
+    lyrics: list[str] = Field(min_length=0, max_length=1000)
+    originals: list[str] | None = Field(default=None, min_length=0, max_length=1000)
 
 
 class MidiLyricsDraftLine(BaseModel):
@@ -953,7 +970,7 @@ def list_workspaces() -> list[dict[str, Any]]:
             {
                 "id": row["id"],
                 "workflow_type": "midi" if is_midi else "rewrite",
-                "title": source_name or ("MIDI 填词" if is_midi else "逐句改唱"),
+                "title": project.get("title") or source_name or ("MIDI 填词" if is_midi else "逐句改唱"),
                 "status": row["status"],
                 "duration": float(row["duration"]),
                 "line_count": len(project.get("segments", [])),
@@ -971,6 +988,59 @@ def list_workspaces() -> list[dict[str, Any]]:
             }
         )
     return workspaces
+
+
+@app.put("/api/workspaces/{project_id}")
+def rename_workspace(project_id: str, request: WorkspaceRename) -> dict[str, str]:
+    project = _load_project(project_id)
+    title = request.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="工作区名称不能为空。")
+    project["title"] = title
+    _save_project(project)
+    return {"id": project_id, "title": title}
+
+
+@app.delete("/api/workspaces/{project_id}")
+def delete_workspace(project_id: str) -> dict[str, str]:
+    directory = _project_dir(project_id)
+    output_root = OUTPUT_ROOT.resolve()
+    if directory.parent != output_root or directory.name != project_id:
+        raise HTTPException(status_code=400, detail="工作区目录路径无效。")
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail="工作区文件不存在。")
+
+    trash = directory.with_name(f".{project_id}.deleting-{uuid.uuid4().hex}")
+    connection = _connect()
+    moved = False
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        busy = connection.execute(
+            "SELECT id FROM jobs WHERE project_id=? AND status IN ('queued','running') LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if busy:
+            raise HTTPException(status_code=409, detail="工作区仍有任务排队或运行，请等任务结束后再删除。")
+        try:
+            directory.rename(trash)
+            moved = True
+        except OSError as exc:
+            raise HTTPException(status_code=409, detail="工作区文件正在使用，暂时无法删除。") from exc
+        connection.execute("DELETE FROM jobs WHERE project_id=?", (project_id,))
+        deleted = connection.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        if deleted.rowcount == 0:
+            raise HTTPException(status_code=404, detail="找不到这个工作区。")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        if moved and trash.exists() and not directory.exists():
+            trash.rename(directory)
+        raise
+    finally:
+        connection.close()
+
+    shutil.rmtree(trash, ignore_errors=True)
+    return {"id": project_id, "status": "deleted"}
 
 
 @app.get("/api/singers")
@@ -1086,6 +1156,7 @@ def _public_midi_project(project: dict[str, Any]) -> dict[str, Any]:
         "id": project["id"],
         "status": project.get("status", "ready"),
         "workflow_type": "midi",
+        "title": project.get("title") or Path(project.get("midi_filename", "旋律 MIDI")).stem,
         "duration": project["duration"],
         "midi_filename": project.get("midi_filename", "melody.mid"),
         "tracks": project.get("tracks", []),
@@ -1169,6 +1240,7 @@ async def create_midi_project(
         "id": project_id,
         "session_dir": str(session_dir),
         "workflow_type": "midi",
+        "title": Path(filename).stem or "MIDI 填词",
         "midi_path": str(midi_path),
         "midi_filename": filename,
         "tracks": midi_info["tracks"],
@@ -1520,9 +1592,11 @@ async def create_project(
         }
 
     created_at = _now()
+    title = Path(Path(audio.filename or "song.wav").name).stem or "逐句改唱"
     project = {
         "id": project_id,
         "session_dir": str(session_dir),
+        "title": title,
         "original_path": str(original_path),
         "sample_rate": 44_100,
         "duration": duration,
@@ -1556,6 +1630,7 @@ async def create_project(
             "original_path": str(original_path),
             "lrc_text": lrc_text,
             "created_at": created_at,
+            "title": title,
             "auto_transcribe": bool(auto_transcribe and not lrc_text.strip()),
             "singer_profile": singer_payload,
         },
@@ -1574,6 +1649,7 @@ def get_project(project_id: str) -> dict[str, Any]:
     return {
         "id": project["id"],
         "status": project_row["status"] if project_row else project["status"],
+        "title": project.get("title") or Path(project.get("original_path", "逐句改唱")).stem,
         "duration": project["duration"],
         "segments": project["segments"],
         "lyrics_source": project.get("lyrics_source", "lrc"),
@@ -1609,15 +1685,81 @@ def save_project_lyrics_draft(
     segments = project.get("segments", [])
     if len(request.lyrics) != len(segments):
         raise HTTPException(status_code=409, detail="歌词行数已变化，请刷新工作区后重试。")
+    if request.originals is not None and len(request.originals) != len(segments):
+        raise HTTPException(status_code=409, detail="原唱歌词行数已变化，请刷新工作区后重试。")
     if any(len(text) > 500 for text in request.lyrics):
         raise HTTPException(status_code=422, detail="单句歌词最多 500 个字符。")
+    if request.originals is not None and any(len(text) > 500 for text in request.originals):
+        raise HTTPException(status_code=422, detail="单句原唱歌词最多 500 个字符。")
 
     project["segments"] = [
-        {**segment, "edited": request.lyrics[index]}
+        {
+            **segment,
+            "edited": request.lyrics[index],
+            "original": request.originals[index]
+            if request.originals is not None
+            else segment.get("original", ""),
+        }
         for index, segment in enumerate(segments)
     ]
     _save_project(project)
     return {"status": "saved"}
+
+
+@app.put("/api/projects/{project_id}/lines")
+def update_project_lyric_lines(
+    project_id: str, request: LyricsLinesUpdate
+) -> dict[str, Any]:
+    project = _load_project(project_id)
+    if project.get("workflow_type") == "midi":
+        raise HTTPException(status_code=404, detail="MIDI 填词工作区不能修改歌词时间片段。")
+    if project.get("status") != "ready":
+        raise HTTPException(status_code=409, detail="工作区准备完成后才能增删歌词行。")
+
+    with _connect() as connection:
+        busy = connection.execute(
+            "SELECT id FROM jobs WHERE project_id=? AND status IN ('queued','running') LIMIT 1",
+            (project_id,),
+        ).fetchone()
+    if busy:
+        raise HTTPException(status_code=409, detail="请等当前试听或整曲任务结束后再增删歌词行。")
+
+    duration = float(project["duration"])
+    lines = sorted(request.lines, key=lambda line: (line.start, line.end))
+    segments: list[dict[str, Any]] = []
+    previous_end: float | None = None
+    for index, line in enumerate(lines, start=1):
+        start = float(line.start)
+        end = float(line.end)
+        if start < 0 or end > duration or end - start < 0.3:
+            raise HTTPException(
+                status_code=422,
+                detail=f"第 {index} 行必须落在音频时长内，且至少有 0.30 秒。",
+            )
+        if previous_end is not None and start < previous_end - 0.01:
+            raise HTTPException(
+                status_code=422,
+                detail=f"第 {index} 行与前一行时间重叠；请先为新句留出独立时间范围。",
+            )
+        segments.append(
+            {
+                "start": start,
+                "end": end,
+                "original": line.original.strip(),
+                "edited": line.edited.strip(),
+            }
+        )
+        previous_end = end
+
+    project["segments"] = segments
+    project["latest_previews"] = {}
+    final_invalidated = bool(project.get("last_generation"))
+    project["last_generation"] = None
+    _save_project(project)
+    return {
+        "segments": segments,
+        "final_invalidated": final_invalidated,
+    }
 
 
 @app.put("/api/projects/{project_id}/singer")

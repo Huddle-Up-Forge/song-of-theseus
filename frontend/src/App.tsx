@@ -12,6 +12,7 @@ const LOCAL_PROJECT_KEY = 'yingstudio:last-project';
 const LOCAL_SINGER_KEY = 'yingstudio:last-singer';
 const TERMINAL = ['succeeded', 'failed', 'canceled'];
 const lyricsDraftKey = (id: string) => `yingstudio:lyrics:${id}`;
+const originalLyricsDraftKey = (id: string) => `yingstudio:lyrics-original:${id}`;
 
 function formatClock(seconds: number) {
   const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -71,9 +72,12 @@ type WorkspaceHomeProps = {
   onRefresh: () => void;
   onNewRewrite: () => void;
   onNewMidi: () => void;
+  onOpen: (workspace: WorkspaceSummary) => void;
+  onRename: (workspace: WorkspaceSummary) => void;
+  onDelete: (workspace: WorkspaceSummary) => void;
 };
 
-function WorkspaceHome({ workspaces, loading, error, onRefresh, onNewRewrite, onNewMidi }: WorkspaceHomeProps) {
+function WorkspaceHome({ workspaces, loading, error, onRefresh, onNewRewrite, onNewMidi, onOpen, onRename, onDelete }: WorkspaceHomeProps) {
   return (
     <div className="workspace-home">
       <section className="workspace-home-hero">
@@ -101,7 +105,7 @@ function WorkspaceHome({ workspaces, loading, error, onRefresh, onNewRewrite, on
         ) : (
           <div className="workspace-list">
             {workspaces.map((item) => (
-              <a className="workspace-card" key={item.id} href={`/?project=${encodeURIComponent(item.id)}&type=${item.workflow_type}`}>
+              <article className="workspace-card" key={item.id}>
                 <span className={`workspace-card-icon ${item.workflow_type}`}>
                   {item.workflow_type === 'midi' ? <FileMusic size={18} /> : <Music2 size={18} />}
                 </span>
@@ -115,8 +119,12 @@ function WorkspaceHome({ workspaces, loading, error, onRefresh, onNewRewrite, on
                   </span>
                 </span>
                 <span className="workspace-card-date"><Clock3 size={12} />{workspaceDate(item.updated_at || item.created_at)}</span>
-                <span className="workspace-card-open">继续<ChevronRight size={15} /></span>
-              </a>
+                <button className="workspace-card-open" onClick={() => onOpen(item)}>继续<ChevronRight size={15} /></button>
+                <span className="workspace-card-actions">
+                  <button className="workspace-card-action" onClick={() => onRename(item)} aria-label={`重命名工作区 ${item.title}`} title="重命名"><Pencil size={13} /><span>重命名</span></button>
+                  <button className="workspace-card-action workspace-card-delete" onClick={() => onDelete(item)} aria-label={`删除工作区 ${item.title}`} title="删除"><Trash2 size={13} /><span>删除</span></button>
+                </span>
+              </article>
             ))}
           </div>
         )}
@@ -162,6 +170,11 @@ function App() {
   const [previewJobs, setPreviewJobs] = useState<Record<number, Job>>({});
   const [timingDrafts, setTimingDrafts] = useState<Record<string, string>>({});
   const [timingSaving, setTimingSaving] = useState(false);
+  const [lineMutationSaving, setLineMutationSaving] = useState(false);
+  const [showAddLine, setShowAddLine] = useState(false);
+  const [newLineText, setNewLineText] = useState('');
+  const [newLineStart, setNewLineStart] = useState('');
+  const [newLineEnd, setNewLineEnd] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast] = useState('');
   const [error, setError] = useState('');
@@ -179,14 +192,17 @@ function App() {
     // preview/job cannot silently reset the text the user is editing.
     try {
       const draft = JSON.parse(localStorage.getItem(lyricsDraftKey(id)) || 'null') as string[] | null;
-      if (Array.isArray(draft)) {
+      const originalDraft = JSON.parse(localStorage.getItem(originalLyricsDraftKey(id)) || 'null') as string[] | null;
+      if (Array.isArray(draft) || Array.isArray(originalDraft)) {
         next.segments = next.segments.map((line, index) => ({
           ...line,
-          edited: typeof draft[index] === 'string' ? draft[index] : line.edited,
+          edited: Array.isArray(draft) && typeof draft[index] === 'string' ? draft[index] : line.edited,
+          original: Array.isArray(originalDraft) && typeof originalDraft[index] === 'string' ? originalDraft[index] : line.original,
         }));
       }
     } catch {
       localStorage.removeItem(lyricsDraftKey(id));
+      localStorage.removeItem(originalLyricsDraftKey(id));
     }
     setProject(next);
     return next;
@@ -202,6 +218,46 @@ function App() {
       setWorkspacesLoading(false);
     }
   }, []);
+
+  const openWorkspace = (item: WorkspaceSummary) => {
+    window.location.assign(`/?project=${encodeURIComponent(item.id)}&type=${item.workflow_type}`);
+  };
+
+  const renameWorkspace = async (item: WorkspaceSummary) => {
+    const requested = window.prompt('修改工作区名称', item.title);
+    if (requested === null) return;
+    const title = requested.trim();
+    if (!title || title === item.title) return;
+    try {
+      const result = await api.renameWorkspace(item.id, title);
+      setWorkspaces((current) => current.map((workspaceItem) => workspaceItem.id === item.id ? { ...workspaceItem, title: result.title } : workspaceItem));
+      setProject((current) => current?.id === item.id ? { ...current, title: result.title } : current);
+      setToast(`工作区已重命名为「${result.title}」。`);
+      window.setTimeout(() => setToast(''), 4200);
+    } catch (cause) {
+      setWorkspacesError(cause instanceof Error ? cause.message : '重命名工作区失败。');
+    }
+  };
+
+  const deleteWorkspace = async (item: WorkspaceSummary) => {
+    const accepted = window.confirm(`删除工作区「${item.title}」？其中的音频、歌词、试听和生成结果都会从本机移除。`);
+    if (!accepted) return;
+    try {
+      await api.deleteWorkspace(item.id);
+      setWorkspaces((current) => current.filter((workspaceItem) => workspaceItem.id !== item.id));
+      if (project?.id === item.id) setProject(null);
+      localStorage.removeItem(lyricsDraftKey(item.id));
+      if (localStorage.getItem(LOCAL_PROJECT_KEY) === item.id) localStorage.removeItem(LOCAL_PROJECT_KEY);
+      if (localStorage.getItem('yingstudio:last-midi-project') === item.id) localStorage.removeItem('yingstudio:last-midi-project');
+      localStorage.removeItem(originalLyricsDraftKey(item.id));
+      setComparison((current) => current?.index !== undefined && project?.id === item.id ? null : current);
+      setPreviewJobs((current) => project?.id === item.id ? {} : current);
+      setToast(`已删除工作区「${item.title}」。`);
+      window.setTimeout(() => setToast(''), 4200);
+    } catch (cause) {
+      setWorkspacesError(cause instanceof Error ? cause.message : '删除工作区失败。');
+    }
+  };
 
   const connectJob = useCallback((jobId: string, projectId: string, previewIndex?: number) => {
     eventSources.current.get(jobId)?.close();
@@ -262,14 +318,17 @@ function App() {
         if (!live) return;
         try {
           const draft = JSON.parse(localStorage.getItem(lyricsDraftKey(requestedProject)) || 'null') as string[] | null;
-          if (Array.isArray(draft)) {
+          const originalDraft = JSON.parse(localStorage.getItem(originalLyricsDraftKey(requestedProject)) || 'null') as string[] | null;
+          if (Array.isArray(draft) || Array.isArray(originalDraft)) {
             saved.segments = saved.segments.map((line, index) => ({
               ...line,
-              edited: typeof draft[index] === 'string' ? draft[index] : line.edited,
+              edited: Array.isArray(draft) && typeof draft[index] === 'string' ? draft[index] : line.edited,
+              original: Array.isArray(originalDraft) && typeof originalDraft[index] === 'string' ? originalDraft[index] : line.original,
             }));
           }
         } catch {
           localStorage.removeItem(lyricsDraftKey(requestedProject));
+          localStorage.removeItem(originalLyricsDraftKey(requestedProject));
         }
         setProject(saved);
         const unfinished = saved.jobs.find((job) => job.status === 'queued' || job.status === 'running');
@@ -324,6 +383,10 @@ function App() {
         lyricsDraftKey(project.id),
         JSON.stringify(project.segments.map((line) => line.edited)),
       );
+      localStorage.setItem(
+        originalLyricsDraftKey(project.id),
+        JSON.stringify(project.segments.map((line) => line.original)),
+      );
     } catch {
       // The project remains usable when browser storage is unavailable/full.
     }
@@ -335,6 +398,7 @@ function App() {
       void api.saveLyricsDraft(
         project.id,
         project.segments.map((line) => line.edited),
+        project.segments.map((line) => line.original),
       ).catch((cause) => setError(cause instanceof Error ? cause.message : '保存歌词草稿失败。'));
     }, 650);
     return () => window.clearTimeout(timer);
@@ -543,6 +607,18 @@ function App() {
     });
   };
 
+  const setOriginalLineText = (index: number, value: string) => {
+    setProject((current) => {
+      if (!current) return current;
+      const segments = current.segments.map((line, lineIndex) => {
+        if (lineIndex !== index) return line;
+        const followsOriginal = line.edited.trim() === line.original.trim();
+        return { ...line, original: value, edited: followsOriginal ? value : line.edited };
+      });
+      return { ...current, segments };
+    });
+  };
+
   const commitLineTime = async (index: number, edge: 'start' | 'end', value: string) => {
     if (!project) return;
     const id = project.id;
@@ -633,6 +709,95 @@ function App() {
       setTimingSaving(false);
       clearDraft();
     }
+  };
+
+  const persistLyricsLines = async (lines: Project['segments'], selectedAfterSave: number, message: string) => {
+    if (!project) return;
+    if (timingLocked || lineMutationSaving) {
+      setError('请等当前试听或整曲任务结束后再增删歌词行。');
+      return;
+    }
+    const id = project.id;
+    setError('');
+    setLineMutationSaving(true);
+    try {
+      const saved = await api.updateLyricsLines(id, lines);
+      localStorage.setItem(lyricsDraftKey(id), JSON.stringify(saved.segments.map((line) => line.edited)));
+      localStorage.setItem(originalLyricsDraftKey(id), JSON.stringify(saved.segments.map((line) => line.original)));
+      setProject((current) => current?.id === id ? {
+        ...current,
+        segments: saved.segments,
+        latest_previews: {},
+        last_generation: null,
+      } : current);
+      setTimingDrafts({});
+      setPreviewJobs({});
+      setComparison(null);
+      setActiveJob(null);
+      setSelectedIndex(saved.segments.length ? Math.max(0, Math.min(selectedAfterSave, saved.segments.length - 1)) : 0);
+      setShowAddLine(false);
+      setToast(saved.final_invalidated ? `${message}旧试听和整曲已标记为过期。` : message);
+      window.setTimeout(() => setToast(''), 4200);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '歌词行保存失败。');
+    } finally {
+      setLineMutationSaving(false);
+    }
+  };
+
+  const beginAddLine = () => {
+    if (!project) return;
+    const gaps: { start: number; end: number }[] = [];
+    let cursor = 0;
+    for (const line of [...project.segments].sort((a, b) => a.start - b.start)) {
+      if (line.start - cursor >= 0.3) gaps.push({ start: cursor, end: line.start });
+      cursor = Math.max(cursor, line.end);
+    }
+    if (project.duration - cursor >= 0.3) gaps.push({ start: cursor, end: project.duration });
+    const anchor = project.segments[selectedIndex]?.end ?? 0;
+    const gap = gaps.find((item) => item.start >= anchor) ?? gaps.find((item) => item.end <= anchor) ?? gaps[0];
+    if (!gap) {
+      setError('当前歌词之间没有可用空档。请先调整现有歌词行的时间，为新行腾出至少 0.30 秒。');
+      return;
+    }
+    const start = gap.start;
+    const end = Math.min(gap.end, start + Math.min(3, gap.end - gap.start));
+    setNewLineText('');
+    setNewLineStart(formatLrcTimestamp(start));
+    setNewLineEnd(formatLrcTimestamp(end));
+    setShowAddLine(true);
+  };
+
+  const addLyricsLine = async () => {
+    if (!project) return;
+    const text = newLineText.trim();
+    const start = parseLrcTimestamp(newLineStart);
+    const end = parseLrcTimestamp(newLineEnd);
+    if (!text) {
+      setError('请填写新歌词行的文字。');
+      return;
+    }
+    if (start === null || end === null || start < 0 || end > project.duration || end - start < 0.3) {
+      setError('请填写有效的起止时间，片段至少 0.30 秒且不能超出音频时长。');
+      return;
+    }
+    const added = { start, end, original: '', edited: text };
+    const lines = [...project.segments, added].sort((a, b) => a.start - b.start);
+    if (lines.some((line, index) => index > 0 && line.start < lines[index - 1].end - 0.01)) {
+      setError('新歌词的时间与现有行重叠。请调整起止时间，或先编辑已有行腾出空档。');
+      return;
+    }
+    const addedIndex = lines.indexOf(added);
+    await persistLyricsLines(lines, addedIndex, '歌词行已添加。');
+  };
+
+  const deleteLyricsLine = async (index: number) => {
+    if (!project) return;
+    const line = project.segments[index];
+    const accepted = window.confirm(`删除第 ${index + 1} 行「${line.edited || line.original}」？这不会删除原曲音频。`);
+    if (!accepted) return;
+    const lines = project.segments.filter((_, lineIndex) => lineIndex !== index);
+    await persistLyricsLines(lines, Math.max(0, index - 1), '歌词行已删除。');
   };
 
   const playOriginal = (index: number) => {
@@ -761,7 +926,7 @@ function App() {
         </header>
 
         <div className="content-wrap">
-          {showHome ? <WorkspaceHome workspaces={workspaces} loading={workspacesLoading} error={workspacesError} onRefresh={() => void refreshWorkspaces()} onNewRewrite={startNewProject} onNewMidi={startNewMidiProject} /> : workspace === 'midi' ? <MidiStudio singers={singers} selectedSingerId={selectedSingerId} onSingerChange={chooseSinger} onOpenSingerManager={openSingerManager} refreshToken={midiProjectRefreshToken} initialProjectId={initialMidiProjectId} /> : <>
+          {showHome ? <WorkspaceHome workspaces={workspaces} loading={workspacesLoading} error={workspacesError} onRefresh={() => void refreshWorkspaces()} onNewRewrite={startNewProject} onNewMidi={startNewMidiProject} onOpen={openWorkspace} onRename={(item) => void renameWorkspace(item)} onDelete={(item) => void deleteWorkspace(item)} /> : workspace === 'midi' ? <MidiStudio singers={singers} selectedSingerId={selectedSingerId} onSingerChange={chooseSinger} onOpenSingerManager={openSingerManager} refreshToken={midiProjectRefreshToken} initialProjectId={initialMidiProjectId} /> : <>
           <section className="page-hero">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" />SING IT YOUR WAY <span className="eyebrow-mono">/ 逐句重构</span></div>
@@ -825,8 +990,17 @@ function App() {
                 <section className="edit-layout">
                   <div className="edit-main">
                     <div className="panel timeline-panel">
-                      <div className="timeline-topline"><div><div className="step-chip">02 <span>EDIT & LISTEN</span></div><h2>逐句编辑你的歌词</h2><p>保留原句就无需改动；点击「听原唱」或「重唱试听」做 A/B 对比。</p><p className="timing-note">每句起唱和句尾可分别校准；需要时会自动调整相邻句边界，句间空白保留原曲伴奏。</p>{project.lyrics_source?.startsWith('whisper-') && <p className="transcription-note"><Sparkles size={11} />本机识别的歌词初稿，歌曲可能听错；请逐句校对。</p>}</div><div className="edit-count"><b>{changedCount.toString().padStart(2, '0')}</b><span>句已修改</span></div></div>
-                      <div className="timeline-tools"><div className="timeline-legend"><span className="legend-original"><i />原始歌词</span><span className="legend-edited"><i />改写歌词</span></div><div className="timeline-count">{project.segments.length} LINES <span>·</span> 排序按 LRC 时间戳</div></div>
+                      <div className="timeline-topline"><div><div className="step-chip">02 <span>EDIT & LISTEN</span></div><h2>逐句编辑你的歌词</h2><p>原唱歌词可直接修正识别错误；修改后歌词用于重唱，点击试听做 A/B 对比。</p><p className="timing-note">每句起唱和句尾可分别校准；需要时会自动调整相邻句边界，句间空白保留原曲伴奏。</p>{project.lyrics_source?.startsWith('whisper-') && <p className="transcription-note"><Sparkles size={11} />本机识别的歌词初稿，歌曲可能听错；请逐句校对。</p>}</div><div className="edit-count"><b>{changedCount.toString().padStart(2, '0')}</b><span>句已修改</span></div></div>
+                      <div className="timeline-tools"><div className="timeline-legend"><span className="legend-original"><i />原始歌词</span><span className="legend-edited"><i />改写歌词</span></div><div className="timeline-tools-right"><div className="timeline-count">{project.segments.length} LINES <span>·</span> 排序按时间戳</div><button className="add-line-trigger" onClick={beginAddLine} disabled={timingLocked || lineMutationSaving || project.segments.length >= 1000}><Plus size={13} />添加歌词行</button></div></div>
+                      {showAddLine && <form className="add-line-form" onSubmit={(event) => { event.preventDefault(); void addLyricsLine(); }}>
+                        <div className="add-line-heading"><b><Plus size={13} />添加一句歌词</b><button type="button" className="icon-button" onClick={() => setShowAddLine(false)} aria-label="取消添加"><X size={14} /></button></div>
+                        <div className="add-line-fields">
+                          <label>歌词<input value={newLineText} onChange={(event) => setNewLineText(event.target.value)} maxLength={500} placeholder="输入新歌词" disabled={lineMutationSaving} autoFocus /></label>
+                          <label>起唱<input value={newLineStart} onChange={(event) => setNewLineStart(event.target.value)} placeholder="00:00.00" disabled={lineMutationSaving || timingLocked} /></label>
+                          <label>句尾<input value={newLineEnd} onChange={(event) => setNewLineEnd(event.target.value)} placeholder="00:03.00" disabled={lineMutationSaving || timingLocked} /></label>
+                        </div>
+                        <div className="add-line-footer"><span>时间格式为 分:秒.百分秒；新行不能与其他歌词时间重叠，最短 0.30 秒。</span><div><button type="button" className="text-button" onClick={() => setShowAddLine(false)}>取消</button><button type="submit" className="button button-primary" disabled={lineMutationSaving || timingLocked}>{lineMutationSaving ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}保存歌词行</button></div></div>
+                      </form>}
                       <div className="line-list" id="line-workspace">
                         {project.segments.map((line, index) => {
                           const edited = line.original.trim() !== line.edited.trim();
@@ -835,12 +1009,12 @@ function App() {
                           return <div className={`line-row ${selectedIndex === index ? 'line-selected' : ''} ${edited ? 'line-edited' : ''}`} key={`${line.start}-${index}`} onClick={() => setSelectedIndex(index)}>
                             <div className="line-number">{(index + 1).toString().padStart(2, '0')}</div>
                             <div className="line-time">
-                              <input className="line-time-input" type="text" value={timingDrafts[timingDraftKey(project.id, index, 'start')] ?? formatLrcTimestamp(line.start)} onChange={(event) => setTimingDrafts((current) => ({ ...current, [timingDraftKey(project.id, index, 'start')]: event.target.value }))} onBlur={(event) => void commitLineTime(index, 'start', event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} onClick={(event) => event.stopPropagation()} disabled={timingLocked} title="编辑此句起唱时间；必要时自动调整相邻句边界" aria-label={`第 ${index + 1} 句起唱时间，格式分:秒.百分秒`} />
+                              <input className="line-time-input" type="text" value={timingDrafts[timingDraftKey(project.id, index, 'start')] ?? formatLrcTimestamp(line.start)} onChange={(event) => setTimingDrafts((current) => ({ ...current, [timingDraftKey(project.id, index, 'start')]: event.target.value }))} onBlur={(event) => void commitLineTime(index, 'start', event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} onClick={(event) => event.stopPropagation()} disabled={timingLocked || lineMutationSaving} title="编辑此句起唱时间；必要时自动调整相邻句边界" aria-label={`第 ${index + 1} 句起唱时间，格式分:秒.百分秒`} />
                               <span>→</span>
-                              <input className="line-time-input line-time-end" type="text" value={timingDrafts[timingDraftKey(project.id, index, 'end')] ?? formatLrcTimestamp(line.end)} onChange={(event) => setTimingDrafts((current) => ({ ...current, [timingDraftKey(project.id, index, 'end')]: event.target.value }))} onBlur={(event) => void commitLineTime(index, 'end', event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} onClick={(event) => event.stopPropagation()} disabled={timingLocked} title="编辑此句句尾；延长时会自动后移下一句起唱点" aria-label={`第 ${index + 1} 句句尾时间，格式分:秒.百分秒`} />
+                              <input className="line-time-input line-time-end" type="text" value={timingDrafts[timingDraftKey(project.id, index, 'end')] ?? formatLrcTimestamp(line.end)} onChange={(event) => setTimingDrafts((current) => ({ ...current, [timingDraftKey(project.id, index, 'end')]: event.target.value }))} onBlur={(event) => void commitLineTime(index, 'end', event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} onClick={(event) => event.stopPropagation()} disabled={timingLocked || lineMutationSaving} title="编辑此句句尾；延长时会自动后移下一句起唱点" aria-label={`第 ${index + 1} 句句尾时间，格式分:秒.百分秒`} />
                             </div>
-                            <div className="line-content"><div className="line-original"><span>原</span><p>{line.original}</p><button className="listen-button" onClick={(event) => { event.stopPropagation(); playOriginal(index); }}><Play size={11} fill="currentColor" />听原唱</button></div><div className="line-edit"><span>新</span><input value={line.edited} onChange={(event) => setLineText(index, event.target.value)} onClick={(event) => event.stopPropagation()} aria-label={`第 ${index + 1} 句修改后歌词`} placeholder="输入新的歌词" /><button className={`listen-button listen-new ${lineBusy ? 'is-busy' : ''}`} disabled={lineBusy || project.status !== 'ready' || timingSaving} title="重新生成这句并在完成后播放" onClick={(event) => { event.stopPropagation(); void requestLinePreview(index); }}>{lineBusy ? <LoaderCircle size={12} className="spin" /> : <Play size={11} fill="currentColor" />}{lineBusy ? '生成中' : '替换试听'}</button></div></div>
-                            <div className={`line-state ${edited ? 'state-changed' : ''}`}>{edited ? <WandSparkles size={14} /> : <span className="state-dash" />}</div>
+                            <div className="line-content"><div className="line-original"><span title="原唱识别歌词">原</span><input value={line.original} onChange={(event) => setOriginalLineText(index, event.target.value)} onClick={(event) => event.stopPropagation()} maxLength={500} disabled={timingLocked || lineMutationSaving} aria-label={`第 ${index + 1} 句原唱歌词`} placeholder="修正原唱歌词" title="可直接修改识别到的原唱歌词" /><button className="listen-button" onClick={(event) => { event.stopPropagation(); playOriginal(index); }}><Play size={11} fill="currentColor" />听原唱</button></div><div className="line-edit"><span>新</span><input value={line.edited} onChange={(event) => setLineText(index, event.target.value)} onClick={(event) => event.stopPropagation()} disabled={timingLocked || lineMutationSaving} aria-label={`第 ${index + 1} 句修改后歌词`} placeholder="输入新的歌词" /><button className={`listen-button listen-new ${lineBusy ? 'is-busy' : ''}`} disabled={lineBusy || project.status !== 'ready' || timingSaving || lineMutationSaving} title="重新生成这句并在完成后播放" onClick={(event) => { event.stopPropagation(); void requestLinePreview(index); }}>{lineBusy ? <LoaderCircle size={12} className="spin" /> : <Play size={11} fill="currentColor" />}{lineBusy ? '生成中' : '替换试听'}</button></div></div>
+                            <div className={`line-state ${edited ? 'state-changed' : ''}`}><span className="line-change-indicator">{edited ? <WandSparkles size={14} /> : <span className="state-dash" />}</span><button className="line-delete-button" onClick={(event) => { event.stopPropagation(); void deleteLyricsLine(index); }} disabled={timingLocked || lineMutationSaving} aria-label={`删除第 ${index + 1} 行歌词`} title="删除歌词行"><Trash2 size={13} /></button></div>
                           </div>;
                         })}
                       </div>

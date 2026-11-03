@@ -495,18 +495,25 @@ def prepare_session(
         if not segments:
             raise WorkflowError("歌词识别没有生成有效的时间戳。请补充 LRC 后重试。")
 
-    prompt_start = max(0.0, segments[0]["start"] - 0.15)
-    prompt_end = min(duration, prompt_start + 7.0)
+    # Keep the reference transcript aligned to exactly one sung phrase. A
+    # fixed 7-second window can straddle two LRC lines; Plus then receives the
+    # extra line as timbre-reference text and may repeat it in the target.
+    prompt_segment = next(
+        (
+            segment
+            for segment in segments
+            if segment.get("original", "").strip()
+            and 2.5 <= float(segment["end"]) - float(segment["start"]) <= 8.0
+        ),
+        segments[0],
+    )
+    prompt_start = max(0.0, float(prompt_segment["start"]))
+    prompt_end = min(duration, float(prompt_segment["end"]))
     first_sample = int(prompt_start * DEMUCS_SAMPLE_RATE)
     last_sample = max(first_sample + 1, int(prompt_end * DEMUCS_SAMPLE_RATE))
     prompt_audio = vocals[:, first_sample:last_sample]
     prompt_path = session_dir / "voice_prompt.wav"
     sf.write(prompt_path, prompt_audio.numpy().T, DEMUCS_SAMPLE_RATE, subtype="PCM_16")
-    prompt_lines = [
-        segment["original"]
-        for segment in segments
-        if segment["start"] < prompt_end and segment["end"] > prompt_start
-    ]
     project = {
         "id": project_id,
         "session_dir": str(session_dir),
@@ -514,9 +521,9 @@ def prepare_session(
         "vocals_path": str(vocal_path),
         "accompaniment_path": str(accompaniment_path),
         "prompt_path": str(prompt_path),
-        "prompt_text": " ".join(prompt_lines) or segments[0]["original"],
+        "prompt_text": prompt_segment.get("original", "").strip() or segments[0]["original"],
         "source_prompt_path": str(prompt_path),
-        "source_prompt_text": " ".join(prompt_lines) or segments[0]["original"],
+        "source_prompt_text": prompt_segment.get("original", "").strip() or segments[0]["original"],
         "singer_profile": None,
         "sample_rate": DEMUCS_SAMPLE_RATE,
         "duration": duration,

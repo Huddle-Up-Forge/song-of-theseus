@@ -25,6 +25,7 @@ export type Job = {
 
 export type Project = {
   id: string;
+  title?: string;
   status: 'preparing' | 'ready' | 'failed' | string;
   lyrics_source?: string;
   singer_profile?: { id: string; name: string; updated_at?: string } | null;
@@ -90,6 +91,7 @@ export type MidiSection = {
 
 export type MidiProject = {
   id: string;
+  title?: string;
   status: string;
   workflow_type: 'midi';
   duration: number;

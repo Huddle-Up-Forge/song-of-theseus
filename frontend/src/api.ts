@@ -18,6 +18,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>('/api/health'),
   workspaces: () => request<WorkspaceSummary[]>('/api/workspaces'),
+  renameWorkspace: (id: string, title: string) => request<{ id: string; title: string }>(`/api/workspaces/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  }),
+  deleteWorkspace: (id: string) => request<{ id: string; status: string }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
   project: (id: string) => request<Project>(`/api/projects/${id}`),
   midiProject: (id: string) => request<MidiProject>(`/api/midi-projects/${id}`),
   queue: () => request<Job[]>('/api/queue'),
@@ -43,11 +49,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ singer_id: singerId }),
     }),
-  saveLyricsDraft: (id: string, lyrics: string[]) =>
+  saveLyricsDraft: (id: string, lyrics: string[], originals: string[]) =>
     request<{ status: string }>(`/api/projects/${id}/draft`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lyrics }),
+      body: JSON.stringify({ lyrics, originals }),
     }),
   saveMidiDraft: (id: string, edited: string[], lrcSource: string, lrcLines: MidiLyricLine[], useLrcLyrics: boolean) =>
     request<{ status: string }>(`/api/midi-projects/${id}/draft`, {
@@ -89,6 +95,12 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ starts, ends }),
+    }),
+  updateLyricsLines: (id: string, lines: Project['segments']) =>
+    request<{ segments: Project['segments']; final_invalidated: boolean }>(`/api/projects/${id}/lines`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lines }),
     }),
   preview: (id: string, index: number, lyrics: string, steps: number, pitchShift: number) =>
     request<{ job_id: string; status: string }>(`/api/projects/${id}/preview`, {
