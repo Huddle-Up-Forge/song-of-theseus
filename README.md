@@ -59,9 +59,9 @@ Join the QQ group shared with [WebSpeak](https://github.com/EchoSixHIYA/WebSpeak
 
 ### Docker deployment
 
-For NVIDIA GPU systems, download the [one-click deployment bundle](https://github.com/Huddle-Up-Forge/song-of-theseus/releases/download/deploy-latest/song-of-theseus-deploy.zip), extract it, and run `deploy.bat` on Windows or `deploy.sh` on Linux. Docker Desktop with WSL 2 and NVIDIA GPU access is required on Windows. The first launch opens the model setup screen; downloaded weights and workspaces stay in the bundle's `data/` folder.
+For NVIDIA GPU systems, download the [one-click deployment bundle](https://github.com/Huddle-Up-Forge/song-of-theseus/releases/download/deploy-latest/song-of-theseus-deploy.zip), extract it, and run `deploy.bat` on Windows or `deploy.sh` on Linux. The bundle includes the source and builds the container locally; the first build can take several minutes. The first launch opens the model setup screen; downloaded weights and workspaces stay in the bundle's `data/` folder.
 
-See [Docker deployment details](deploy/README.md). The source build is available in the repository's `Dockerfile`; published images are hosted at [GitHub Container Registry](https://ghcr.io/huddle-up-forge/song-of-theseus).
+See [Docker deployment details](deploy/README.md). GitHub Actions also publishes the GPU image to [GitHub Container Registry](https://ghcr.io/huddle-up-forge/song-of-theseus).
 
 ### Run from source on Windows
 

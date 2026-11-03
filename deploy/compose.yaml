@@ -1,6 +1,9 @@
 services:
   song-of-theseus:
     image: ghcr.io/huddle-up-forge/song-of-theseus:latest
+    build:
+      context: ${SONG_OF_THESEUS_SOURCE:-..}
+      dockerfile: Dockerfile
     container_name: song-of-theseus
     restart: unless-stopped
     ports:

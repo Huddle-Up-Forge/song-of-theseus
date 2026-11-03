@@ -59,9 +59,9 @@ Song of Theseus 是一套以本機為優先的歌聲與歌詞編輯工作台。�
 
 ### Docker 部署
 
-NVIDIA 顯示卡使用者可下載[一鍵部署套件](https://github.com/Huddle-Up-Forge/song-of-theseus/releases/download/deploy-latest/song-of-theseus-deploy.zip)，解壓縮後在 Windows 點擊 `deploy.bat`，或在 Linux 執行 `deploy.sh`。Windows 需要使用 WSL 2 並啟用 NVIDIA GPU 的 Docker Desktop。首次啟動會開啟模型設定頁；權重與工作區會保存在部署資料夾中的 `data/`。
+NVIDIA 顯示卡使用者可下載[一鍵部署套件](https://github.com/Huddle-Up-Forge/song-of-theseus/releases/download/deploy-latest/song-of-theseus-deploy.zip)，完整解壓縮後在 Windows 點擊 `deploy.bat`，或在 Linux 執行 `deploy.sh`。套件包含原始碼並會在本機建置容器，首次建置可能需要幾分鐘。首次啟動會開啟模型設定頁；權重與工作區會保存在部署資料夾中的 `data/`。
 
-詳見 [Docker 部署說明](deploy/README.md)。Docker 映像會由 GitHub Actions 建置並發布到 [GitHub Container Registry](https://ghcr.io/huddle-up-forge/song-of-theseus)。
+詳見 [Docker 部署說明](deploy/README.md)。GitHub Actions 也會建置 GPU 映像並發布到 [GitHub Container Registry](https://ghcr.io/huddle-up-forge/song-of-theseus)。
 
 ### 從原始碼在 Windows 執行
 

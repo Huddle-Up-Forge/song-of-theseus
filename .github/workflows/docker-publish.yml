@@ -73,8 +73,10 @@ jobs:
 
       - name: Build one-click deployment bundle
         run: |
-          cd deploy
-          zip -j ../song-of-theseus-deploy.zip compose.yaml deploy.bat stop.bat deploy.sh README.md
+          mkdir -p deployment/source
+          git archive "${GITHUB_SHA}" | tar -x -C deployment/source
+          cp deploy/compose.yaml deploy/deploy.bat deploy/stop.bat deploy/deploy.sh deploy/README.md deployment/
+          (cd deployment && zip -qr ../song-of-theseus-deploy.zip .)
 
       - name: Upload deployment bundle
         uses: actions/upload-artifact@v4

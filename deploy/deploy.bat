@@ -23,10 +23,21 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if exist "%~dp0source\Dockerfile" (
+  for %%I in ("%~dp0source") do set "SONG_OF_THESEUS_SOURCE=%%~fI"
+) else if exist "%~dp0..\Dockerfile" (
+  for %%I in ("%~dp0..") do set "SONG_OF_THESEUS_SOURCE=%%~fI"
+) else (
+  echo The Song of Theseus source folder is missing. Extract the full deployment bundle and try again.
+  pause
+  exit /b 1
+)
+
 for %%I in ("%~dp0data") do set "SONG_OF_THESEUS_DATA=%%~fI"
-docker compose -f "%~dp0compose.yaml" pull
+echo Building Song of Theseus from the included source. The first build may take several minutes.
+docker compose -f "%~dp0compose.yaml" build
 if errorlevel 1 (
-  echo Could not download the Song of Theseus image.
+  echo Song of Theseus image build failed.
   pause
   exit /b 1
 )
