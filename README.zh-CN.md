@@ -16,7 +16,7 @@
     <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a>
   </p>
   <p>
-    <a href="#overview">项目介绍</a> · <a href="#features">功能</a> · <a href="#quick-start">快速开始</a> · <a href="#documentation">文档</a> · <a href="#credits">致谢与许可</a>
+    <a href="#overview">项目介绍</a> · <a href="#features">功能</a> · <a href="#community">交流群</a> · <a href="#quick-start">快速开始</a> · <a href="#documentation">文档</a> · <a href="#credits">致谢与许可</a>
   </p>
 </div>
 
@@ -40,11 +40,32 @@ Song of Theseus 是一款本地优先的歌声与歌词编辑工作台。上传�
 | 🎧 整曲生成 | 保留未改动的人声和原伴奏，只替换修改过的歌词片段并拼接输出。 |
 | 💾 本地工作区 | 在本机保存项目、歌词草稿、歌手资料和任务历史。 |
 
+<a id="community"></a>
+
+## 交流群
+
+欢迎加入与 [WebSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak) 共用的 QQ 群交流。**群号：`869500475`。**
+
+<p align="center">
+  <a href="http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=yhumUMDD9PmyYFWdXWUb_x7hM5trFQY8&authKey=Pw3HBGT7GwMinTQnuFGfnpf0aRSzXOJKcAiujVP1%2BXMpjheAKrncTRivicBJxpjV&noverify=0&group_code=869500475">
+    <img src="./docs/assets/webspeak-qq-group-qr.jpg" alt="QQ群 869500475 二维码" width="290" />
+  </a>
+  <br />二维码来自 <a href="https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak">WebSpeak 仓库</a>。
+</p>
+
 <a id="quick-start"></a>
 
 ## 快速开始
 
-本项目以 Windows 本地运行为主。首次启动前请先按完整指南配置环境：
+### Docker 部署
+
+NVIDIA 显卡用户可下载[一键部署包](https://github.com/Huddle-Up-Forge/song-of-theseus/releases/download/deploy-latest/song-of-theseus-deploy.zip)，解压后在 Windows 双击 `deploy.bat`，或在 Linux 运行 `deploy.sh`。Windows 需要安装带 WSL 2 后端并支持 NVIDIA GPU 的 Docker Desktop。首次启动会打开模型设置页；下载的权重和工作区保存在部署包旁边的 `data/` 目录。
+
+详见 [Docker 部署说明](deploy/README.md)。Docker 镜像通过 GitHub Actions 构建并发布至 [GitHub Container Registry](https://ghcr.io/huddle-up-forge/song-of-theseus)，也可以查看仓库中的 `Dockerfile`。
+
+### Windows 源码运行
+
+按 [LOCAL_WINDOWS.md](LOCAL_WINDOWS.md) 和 Plus 上游说明配置 Python 环境、CUDA 版 PyTorch 与模型权重：
 
 1. 克隆本仓库，并将官方 Plus 项目放到旁边：
 
@@ -53,20 +74,18 @@ Song of Theseus 是一款本地优先的歌声与歌词编辑工作台。上传�
    git clone https://github.com/ASLP-lab/YingMusic-Singer-Plus.git ..\YingMusic-Singer-Plus
    ```
 
-2. 按 [LOCAL_WINDOWS.md](LOCAL_WINDOWS.md) 和 Plus 上游说明配置 Python 环境、CUDA 版 PyTorch 及模型权重。
-3. 运行 `run_local.bat`，然后访问 [http://127.0.0.1:23253](http://127.0.0.1:23253)。
-
-服务会监听所有网络接口，局域网设备也能访问。程序没有内置登录，请只在可信的私人网络中使用，并配置好防火墙。
+2. 运行 `run_local.bat`，然后访问 [http://127.0.0.1:23253](http://127.0.0.1:23253)。
 
 <a id="documentation"></a>
 
 ## 文档
 
 - [Windows 环境配置与故障排查](LOCAL_WINDOWS.md)
+- [Docker 部署包](deploy/README.md)
 - [第三方声明与许可证范围](THIRD_PARTY_NOTICES.md)
 - [GNU AGPLv3-only 许可证](LICENSE)
 
-YingMusic-Singer-Plus、Whisper large-v3 和 Demucs 权重会在首次使用对应功能时另行下载。本仓库不包含模型权重或生成音频。生成速度取决于显卡、可用显存、音频长度和采样步数。
+YingMusic-Singer-Plus、Whisper large-v3 和 Demucs 权重会在模型设置页从上游来源下载。本仓库和 Docker 镜像均不包含模型权重或生成音频。
 
 <a id="credits"></a>
 
@@ -79,7 +98,7 @@ YingMusic-Singer-Plus、Whisper large-v3 和 Demucs 权重会在首次使用对�
 - [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) 和 [Whisper large-v3](https://huggingface.co/openai/whisper-large-v3)，用于本机歌词识别。
 - YingMusic-Singer-Plus 上游还致谢 [F5-TTS](https://github.com/SWivid/F5-TTS)、[Stable Audio](https://github.com/Stability-AI/stable-audio-tools)、[SOME](https://github.com/openvpi/SOME)、[DiffRhythm](https://github.com/ASLP-lab/DiffRhythm)、[GTSinger](https://github.com/GTSinger/GTSinger) 和 [Emilia](https://github.com/open-mmlab/Emilia)。
 
-本仓库中的 Song of Theseus 原创应用代码采用 **GNU AGPLv3-only**。这不会重新许可另行下载的模型代码或权重。YingMusic-Singer-Plus 与其基于 Stability AI 的 VAE 适用不同许可；重新分发整合包或用于商业用途前，请先阅读 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本仓库中的 Song of Theseus 原创应用代码采用 **GNU AGPLv3-only**。另行下载的模型代码和权重沿用各自上游许可证；组件来源与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 如在研究中使用歌声模型，请引用上游论文：
 

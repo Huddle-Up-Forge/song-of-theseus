@@ -1,0 +1,6 @@
+{
+  "is_distilled": false,
+  "model_cfg_path": "src/YingMusicSinger/config/YingMusic_Singer.yaml",
+  "use_ema": true,
+  "vae_config_path": "src/YingMusicSinger/config/stable_audio_2_0_vae_20hz_official.json"
+}

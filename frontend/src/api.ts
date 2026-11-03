@@ -1,4 +1,4 @@
-import type { Health, Job, MidiLyricLine, MidiLyricLinePayload, MidiProject, Project, SingerProfile, WorkspaceSummary } from './types';
+import type { Health, Job, MidiLyricLine, MidiLyricLinePayload, MidiProject, Project, SetupModels, SingerProfile, WorkspaceSummary } from './types';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -17,6 +17,34 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>('/api/health'),
+  setupModels: () => request<SetupModels>('/api/setup/models'),
+  downloadModel: (id: string) => request<SetupModels>(`/api/setup/models/${id}/download`, { method: 'POST' }),
+  uploadModel: (id: string, file: File, onProgress: (percent: number) => void) =>
+    new Promise<SetupModels>((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', file);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/api/setup/models/${id}/upload`);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+      };
+      xhr.onerror = () => reject(new Error('模型上传连接中断。'));
+      xhr.onload = () => {
+        let body: { detail?: string } | SetupModels;
+        try {
+          body = JSON.parse(xhr.responseText) as { detail?: string } | SetupModels;
+        } catch {
+          reject(new Error(`上传失败（${xhr.status}）`));
+          return;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error('detail' in body ? body.detail || `上传失败（${xhr.status}）` : `上传失败（${xhr.status}）`));
+          return;
+        }
+        resolve(body as SetupModels);
+      };
+      xhr.send(form);
+    }),
   workspaces: () => request<WorkspaceSummary[]>('/api/workspaces'),
   renameWorkspace: (id: string, title: string) => request<{ id: string; title: string }>(`/api/workspaces/${id}`, {
     method: 'PUT',
@@ -26,7 +54,6 @@ export const api = {
   deleteWorkspace: (id: string) => request<{ id: string; status: string }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
   project: (id: string) => request<Project>(`/api/projects/${id}`),
   midiProject: (id: string) => request<MidiProject>(`/api/midi-projects/${id}`),
-  queue: () => request<Job[]>('/api/queue'),
   singers: () => request<SingerProfile[]>('/api/singers'),
   createSinger: (name: string, referenceText: string, audio: File) => {
     const form = new FormData();

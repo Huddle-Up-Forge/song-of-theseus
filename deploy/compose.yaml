@@ -1,0 +1,26 @@
+services:
+  song-of-theseus:
+    image: ghcr.io/huddle-up-forge/song-of-theseus:latest
+    container_name: song-of-theseus
+    restart: unless-stopped
+    ports:
+      - "${YINGSTUDIO_PORT:-23253}:23253"
+    volumes:
+      - "${SONG_OF_THESEUS_DATA:-./data}:/data"
+    environment:
+      YINGSTUDIO_HOST: 0.0.0.0
+      YINGSTUDIO_PORT: 23253
+      YINGSTUDIO_DATA_ROOT: /data
+      YINGSTUDIO_MODEL_ROOT: /data/models
+      YINGMUSIC_PLUS_ROOT: /opt/YingMusic-Singer-Plus
+      HF_HOME: /data/models/huggingface
+      HF_HUB_CACHE: /data/models/huggingface/hub
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TORCH_HOME: /data/models/torch
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

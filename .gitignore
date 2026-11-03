@@ -94,6 +94,8 @@ resources/infer_out/
 # Cache directories
 .cache/
 *.cache
+*.partial
+deploy/data/
 
 # Logs
 *.log

@@ -118,6 +118,30 @@ export type Health = {
   transcription: boolean;
 };
 
+export type SetupModel = {
+  id: 'singing' | 'demucs' | 'whisper';
+  name: string;
+  description: string;
+  size: string;
+  source_url: string;
+  path: string;
+  ready: boolean;
+  status: 'ready' | 'missing' | 'downloading' | 'uploading' | 'failed' | string;
+  progress: number;
+  message: string;
+  error: string;
+  downloaded_bytes: number;
+  total_bytes: number;
+};
+
+export type SetupModels = {
+  ready: boolean;
+  core_ready: boolean;
+  data_root: string;
+  model_root: string;
+  models: SetupModel[];
+};
+
 export type WorkspaceSummary = {
   id: string;
   workflow_type: 'rewrite' | 'midi';

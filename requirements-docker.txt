@@ -1,0 +1,13 @@
+-r requirements.txt
+
+# Inference-only packages required by the pinned YingMusic-Singer-Plus source.
+ema-pytorch==0.7.7
+huggingface-hub==0.35.3
+rotary-embedding-torch==0.8.9
+torchdiffeq==0.2.5
+torchsde==0.2.6
+x-transformers==2.1.2
+vector-quantize-pytorch==1.23.2
+alias-free-torch==0.0.6
+einops==0.8.1
+transformers==4.57.6

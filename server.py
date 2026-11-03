@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import model_assets
+
 import soundfile as sf
 import torch
 import uvicorn
@@ -29,11 +31,12 @@ import workflow
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_ROOT = workflow.OUTPUT_ROOT
-DATABASE_PATH = ROOT / "outputs" / "yingstudio.sqlite3"
+DATABASE_PATH = model_assets.DATA_ROOT / "yingstudio.sqlite3"
 FRONTEND_DIST = ROOT / "frontend" / "dist"
-SINGER_LIBRARY_ROOT = ROOT / "outputs" / "singers"
+SINGER_LIBRARY_ROOT = model_assets.DATA_ROOT / "singers"
 MAX_UPLOAD_BYTES = 300 * 1024 * 1024
 MAX_SINGER_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_MODEL_UPLOAD_BYTES = 12 * 1024 * 1024 * 1024
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
 SUPPORTED_MIDI_EXTENSIONS = {".mid", ".midi"}
 TERMINAL_STATES = {"succeeded", "failed", "canceled"}
@@ -932,6 +935,39 @@ def health() -> dict[str, Any]:
         "scheduler_workers": 1,
         "transcription": importlib.util.find_spec("faster_whisper") is not None,
     }
+
+
+@app.get("/api/setup/models")
+def setup_models() -> dict[str, Any]:
+    return model_assets.setup_state()
+
+
+@app.post("/api/setup/models/{asset_id}/download")
+def download_setup_model(asset_id: str) -> dict[str, Any]:
+    try:
+        return model_assets.start_download(asset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/setup/models/{asset_id}/upload")
+async def upload_setup_model(asset_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    if asset_id not in model_assets.MODEL_INFO:
+        await file.close()
+        raise HTTPException(status_code=404, detail="找不到这个模型。")
+    if file.size is not None and file.size > MAX_MODEL_UPLOAD_BYTES:
+        await file.close()
+        raise HTTPException(status_code=413, detail="单个模型上传文件不能超过 12 GB。")
+    try:
+        return await model_assets.upload_model(asset_id, file.filename or "", file.file)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        await file.close()
 
 
 @app.get("/api/workspaces")

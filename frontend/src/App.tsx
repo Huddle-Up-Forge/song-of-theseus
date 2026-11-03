@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Activity, AudioLines, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Cpu,
+  AudioLines, Check, ChevronDown, ChevronRight, Clock3, Cpu,
   Download, FileAudio, FileMusic, FileText, Headphones, LoaderCircle, Music2, Pause, Play, Plus,
   FolderOpen, Home, Mic2, Pencil, Radio, RefreshCw, Sparkles, Square, Trash2, Upload, Volume2, VolumeX, WandSparkles, X,
+  Settings2,
 } from 'lucide-react';
 import { api, uploadProject, watchJob } from './api';
-import type { Health, Job, Project, SingerProfile, WorkspaceSummary } from './types';
+import type { Health, Job, Project, SetupModels, SetupModel, SingerProfile, WorkspaceSummary } from './types';
 import MidiStudio from './MidiStudio';
 
 const LOCAL_PROJECT_KEY = 'yingstudio:last-project';
 const LOCAL_SINGER_KEY = 'yingstudio:last-singer';
+const SETUP_DISMISSED_KEY = 'yingstudio:model-setup-dismissed';
 const TERMINAL = ['succeeded', 'failed', 'canceled'];
 const lyricsDraftKey = (id: string) => `yingstudio:lyrics:${id}`;
 const originalLyricsDraftKey = (id: string) => `yingstudio:lyrics-original:${id}`;
@@ -142,7 +144,11 @@ function App() {
   const [initialMidiProjectId, setInitialMidiProjectId] = useState<string | null>(initialWorkspace === 'midi' && initialProjectId ? initialProjectId : null);
   const [midiProjectRefreshToken, setMidiProjectRefreshToken] = useState(0);
   const [health, setHealth] = useState<Health | null>(null);
-  const [queue, setQueue] = useState<Job[]>([]);
+  const [setupModels, setSetupModels] = useState<SetupModels | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [setupError, setSetupError] = useState('');
+  const [setupActionId, setSetupActionId] = useState('');
+  const [setupUploadProgress, setSetupUploadProgress] = useState<Record<string, number>>({});
   const [project, setProject] = useState<Project | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
@@ -184,6 +190,48 @@ function App() {
   const lrcInput = useRef<HTMLInputElement>(null);
   const singerAudioInput = useRef<HTMLInputElement>(null);
   const eventSources = useRef(new Map<string, EventSource>());
+
+  const refreshSetupModels = useCallback(async () => {
+    const next = await api.setupModels();
+    setSetupModels(next);
+    if (next.ready) localStorage.setItem(SETUP_DISMISSED_KEY, '1');
+    return next;
+  }, []);
+
+  const openSettings = () => {
+    setShowSettings(true);
+    setSetupError('');
+    void refreshSetupModels().catch((cause) => setSetupError(cause instanceof Error ? cause.message : '读取模型状态失败。'));
+  };
+
+  const downloadSetupModel = async (model: SetupModel) => {
+    setSetupError('');
+    setSetupActionId(model.id);
+    try {
+      setSetupModels(await api.downloadModel(model.id));
+    } catch (cause) {
+      setSetupError(cause instanceof Error ? cause.message : '无法开始下载模型。');
+      void refreshSetupModels().catch(() => undefined);
+    } finally {
+      setSetupActionId('');
+    }
+  };
+
+  const uploadSetupModel = async (model: SetupModel, file: File) => {
+    setSetupError('');
+    setSetupUploadProgress((current) => ({ ...current, [model.id]: 0 }));
+    setSetupActionId(model.id);
+    try {
+      setSetupModels(await api.uploadModel(model.id, file, (percent) => setSetupUploadProgress((current) => ({ ...current, [model.id]: percent }))));
+      setSetupError('');
+    } catch (cause) {
+      setSetupError(cause instanceof Error ? cause.message : '模型文件安装失败。');
+      void refreshSetupModels().catch(() => undefined);
+    } finally {
+      setSetupActionId('');
+      setSetupUploadProgress((current) => { const next = { ...current }; delete next[model.id]; return next; });
+    }
+  };
 
   const refreshProject = useCallback(async (id: string) => {
     const next = await api.project(id);
@@ -270,7 +318,6 @@ function App() {
       if (!TERMINAL.includes(job.status)) return;
       eventSources.current.get(jobId)?.close();
       eventSources.current.delete(jobId);
-      void api.queue().then(setQueue).catch(() => undefined);
       if (job.status === 'failed') setError(job.error || '任务失败，请查看状态详情。');
       if (job.status === 'succeeded') {
         setError('');
@@ -294,9 +341,17 @@ function App() {
     let live = true;
     const refresh = () => {
       api.health().then((value) => live && setHealth(value)).catch(() => live && setHealth(null));
-      api.queue().then((value) => live && setQueue(value)).catch(() => undefined);
     };
     refresh();
+    api.setupModels().then((value) => {
+      if (!live) return;
+      setSetupModels(value);
+      if (value.ready) {
+        localStorage.setItem(SETUP_DISMISSED_KEY, '1');
+      } else if (localStorage.getItem(SETUP_DISMISSED_KEY) !== '1') {
+        setShowSettings(true);
+      }
+    }).catch(() => undefined);
     void refreshWorkspaces();
     const workspaceTimer = window.setInterval(() => void refreshWorkspaces(), 15000);
     api.singers().then((profiles) => {
@@ -375,6 +430,15 @@ function App() {
       eventSources.current.clear();
     };
   }, [connectJob, refreshWorkspaces]);
+
+  const setupHasDownloads = Boolean(setupModels?.models.some((model) => model.status === 'downloading' || model.status === 'uploading'));
+  useEffect(() => {
+    if (!showSettings && !setupHasDownloads) return;
+    const timer = window.setInterval(() => {
+      void refreshSetupModels().catch(() => undefined);
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [showSettings, setupHasDownloads, refreshSetupModels]);
 
   useEffect(() => {
     if (!project) return;
@@ -868,6 +932,11 @@ function App() {
     if (file) setAudioFile(file);
   };
 
+  const closeSettings = () => {
+    setShowSettings(false);
+    localStorage.setItem(SETUP_DISMISSED_KEY, '1');
+  };
+
   const previewJob = selectedIndex in previewJobs ? previewJobs[selectedIndex] : undefined;
   const hasGeneratedSong = Boolean(project?.last_generation);
 
@@ -885,8 +954,6 @@ function App() {
           <button className={`nav-item ${showHome ? 'nav-active' : ''}`} onClick={goHome}><Home size={17} /><span>工作区首页</span>{showHome && <span className="nav-dot" />}</button>
           <button className={`nav-item ${!showHome && workspace === 'rewrite' ? 'nav-active' : ''}`} onClick={() => { setWorkspace('rewrite'); setShowHome(false); }}><Music2 size={17} /><span>逐句改唱</span>{!showHome && workspace === 'rewrite' && <span className="nav-dot" />}</button>
           <button className={`nav-item ${!showHome && workspace === 'midi' ? 'nav-active' : ''}`} onClick={() => { setWorkspace('midi'); setShowHome(false); }}><FileMusic size={17} /><span>MIDI 填词</span>{!showHome && workspace === 'midi' && <span className="nav-dot" />}</button>
-          <button className="nav-item" onClick={() => document.querySelector('.line-workspace')?.scrollIntoView({ behavior: 'smooth' })}><AudioLines size={17} /><span>歌词时间轴</span></button>
-          <button className="nav-item" onClick={() => document.querySelector('.queue-panel')?.scrollIntoView({ behavior: 'smooth' })}><Activity size={17} /><span>任务队列</span>{queue.some((job) => job.status === 'queued' || job.status === 'running') && <i />}</button>
           <button className="nav-item" onClick={openSingerManager}><Mic2 size={17} /><span>歌手管理</span><span className="nav-count">{singers.length}</span></button>
 
           <div className="rail-section-label rail-gap">本地引擎</div>
@@ -894,29 +961,16 @@ function App() {
             <div className="gpu-top"><span className="engine-pulse"><span /></span><span>GPU ENGINE</span><span className="engine-state">{health?.online ? 'ONLINE' : 'CONNECTING'}</span></div>
             <div className="gpu-name"><Cpu size={17} />{health?.gpu_name || '正在连接本地服务'}</div>
             <div className="gpu-stats"><span>设备</span><b>{health?.device?.toUpperCase() || '—'}</b></div>
-            <div className="gpu-stats"><span>队列</span><b>{health ? `${health.queued_tasks} 等待` : '—'}</b></div>
             <div className="gpu-bar"><span style={{ width: `${health?.gpu_total_gib && health.gpu_free_gib !== null ? Math.max(5, (1 - health.gpu_free_gib / health.gpu_total_gib) * 100) : 5}%` }} /></div>
             <div className="gpu-foot"><span>显存占用</span><span>{health?.gpu_total_gib && health.gpu_free_gib !== null ? `${(health.gpu_total_gib - health.gpu_free_gib).toFixed(1)} / ${health.gpu_total_gib} GB` : '等待采样'}</span></div>
           </div>
 
-          <div className="queue-panel">
-            <div className="rail-section-head"><div className="rail-section-label">最近任务</div><span>{queue.length.toString().padStart(2, '0')}</span></div>
-            {queue.length === 0 ? <div className="queue-empty">上传一首歌，队列会显示在这里。</div> : queue.slice(0, 5).map((job) => (
-              <div className="queue-item" key={job.id}>
-                <div className={`queue-icon ${job.status}`}>
-                  {job.status === 'running' ? <LoaderCircle size={13} className="spin" /> : job.status === 'succeeded' ? <Check size={13} /> : job.kind === 'preview' ? <Headphones size={13} /> : <WandSparkles size={13} />}
-                </div>
-                <div className="queue-meta"><b>{job.kind === 'prepare' ? '人声分离' : job.kind === 'preview' ? '逐句试听' : job.kind === 'generate_song' ? '整曲重唱' : job.kind === 'midi_generate_song' ? 'MIDI 整曲生成' : job.kind}</b><small>{statusLabel(job.status)}</small></div>
-                {job.status === 'running' && <span className="queue-live" />}
-              </div>
-            ))}
-          </div>
           <div className="rail-bottom">
-            <button className="nav-item" onClick={() => setToast('没有 LRC 时可使用本机 Whisper large-v3 识别歌词，识别结果需要校对。')}><CircleHelp size={17} /><span>使用说明</span></button>
+            <button className="nav-item settings-nav-item" onClick={openSettings}><Settings2 size={17} /><span>设置与模型</span>{setupModels && !setupModels.ready && <i aria-label="模型待安装" />}</button>
             <div className="rail-version"><span className="version-wave"><AudioLines size={14} /></span><div><b>Song of Theseus</b><small>LOCAL SINGING WORKSTATION</small></div></div>
           </div>
         </>}
-        {collapsed && <div className="collapsed-nav"><button className={`nav-item ${showHome ? 'nav-active' : ''}`} aria-label="工作区首页" onClick={goHome}><Home size={18} /></button><button className={`nav-item ${!showHome && workspace === 'rewrite' ? 'nav-active' : ''}`} aria-label="逐句改唱" onClick={() => { setWorkspace('rewrite'); setShowHome(false); }}><Music2 size={18} /></button><button className={`nav-item ${!showHome && workspace === 'midi' ? 'nav-active' : ''}`} aria-label="MIDI 填词" onClick={() => { setWorkspace('midi'); setShowHome(false); }}><FileMusic size={18} /></button><button className="nav-item" aria-label="歌手管理" onClick={openSingerManager}><Mic2 size={18} /></button><button className="nav-item" aria-label="任务队列"><Activity size={18} /></button></div>}
+        {collapsed && <div className="collapsed-nav"><button className={`nav-item ${showHome ? 'nav-active' : ''}`} aria-label="工作区首页" onClick={goHome}><Home size={18} /></button><button className={`nav-item ${!showHome && workspace === 'rewrite' ? 'nav-active' : ''}`} aria-label="逐句改唱" onClick={() => { setWorkspace('rewrite'); setShowHome(false); }}><Music2 size={18} /></button><button className={`nav-item ${!showHome && workspace === 'midi' ? 'nav-active' : ''}`} aria-label="MIDI 填词" onClick={() => { setWorkspace('midi'); setShowHome(false); }}><FileMusic size={18} /></button><button className="nav-item" aria-label="歌手管理" onClick={openSingerManager}><Mic2 size={18} /></button><button className="nav-item" aria-label="设置与模型" onClick={openSettings}><Settings2 size={18} />{setupModels && !setupModels.ready && <i />}</button></div>}
       </aside>
 
       <main className="main-area">
@@ -1048,7 +1102,6 @@ function App() {
                         {previewJob && <div className={`preview-status ${previewJob.status}`}><span>{statusLabel(previewJob.status)}</span><small>{previewJob.label}</small>{previewJob.status === 'failed' && <small>{previewJob.error}</small>}</div>}
                       </> : <div className="inspector-empty"><Headphones size={26} /><b>选一句歌词开始试听</b><span>逐句听原唱与重唱的差异</span></div>}
                     </div>
-                    <div className="panel queue-card queue-panel"><div className="queue-card-head"><div><div className="step-chip">SCHEDULER</div><h3>GPU 任务队列</h3></div><span className="worker-pill"><i />1 WORKER</span></div><p>试听优先 · 整曲分句排队</p><div className="queue-list">{queue.filter((job) => !job.parent_id).slice(0, 5).map((job) => <div className="queue-task" key={job.id}><span className={`queue-task-icon ${job.status}`}>{job.status === 'running' ? <LoaderCircle size={13} className="spin" /> : job.status === 'succeeded' ? <Check size={13} /> : <Activity size={13} />}</span><div><b>{job.kind === 'prepare' ? '人声分离' : job.kind === 'preview' ? '重唱试听' : job.kind === 'generate_song' ? '整曲渲染' : job.kind === 'midi_generate_song' ? 'MIDI 整曲生成' : job.kind}</b><small>{job.label}</small></div><span className={`queue-state state-${job.status}`}>{statusLabel(job.status)}</span></div>)}</div><div className="queue-rule"><span>CUDA</span><i /><span>单路串行，避免显存抢占</span></div></div>
                     <div className="tip-card"><Sparkles size={15} /><div><b>小提示</b><span>先用 32 步试听确认节奏和咬字，再将整曲步数调高。64 步耗时最长。</span></div></div>
                   </aside>
                 </section>
@@ -1086,6 +1139,50 @@ function App() {
               })}
             </div>
           </div>
+        </section>
+      </div>}
+      {showSettings && <div className="modal-backdrop setup-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}>
+        <section className="panel setup-modal" role="dialog" aria-modal="true" aria-label="设置与模型">
+          <div className="singer-modal-heading">
+            <div><div className="step-chip"><Settings2 size={13} /> MODEL SETUP</div><h2>{setupModels?.ready ? '设置与模型' : '准备本地模型'}</h2><p>首次运行先准备推理权重；下载完成后会自动安装到应用的数据目录。</p></div>
+            <button className="icon-button" aria-label="关闭设置" onClick={closeSettings}><X size={16} /></button>
+          </div>
+          {setupError && <div className="alert alert-error setup-error"><X size={15} /><span>{setupError}</span><button onClick={() => setSetupError('')} aria-label="关闭错误"><X size={13} /></button></div>}
+          {!setupModels ? <div className="setup-loading"><LoaderCircle size={18} className="spin" />正在读取模型状态…</div> : <>
+            <div className="setup-summary"><span className={setupModels.core_ready ? 'setup-summary-ready' : ''}><i />{setupModels.core_ready ? '推理模型已就绪' : '需要下载核心推理模型'}</span><small>数据目录 <code>{setupModels.data_root}</code></small></div>
+            <div className="setup-model-list">
+              {setupModels.models.map((model) => {
+                const busy = model.status === 'downloading' || model.status === 'uploading' || setupActionId === model.id;
+                const uploading = model.status === 'uploading' || setupUploadProgress[model.id] !== undefined;
+                const progress = uploading ? setupUploadProgress[model.id] ?? model.progress * 100 : model.progress * 100;
+                const accepted = model.id === 'singing' ? '.zip,.safetensors' : model.id === 'demucs' ? '.zip,.th' : '.zip';
+                const uploadHint = model.id === 'singing'
+                  ? '可上传完整 model.safetensors，或包含它的 ZIP。'
+                  : model.id === 'demucs'
+                    ? '上传 htdemucs 检查点文件，或包含该文件的 ZIP。'
+                    : 'ZIP 需包含 model.bin、config.json、tokenizer.json、vocabulary.json 和 preprocessor_config.json。';
+                return <article className={`setup-model-card ${model.ready ? 'setup-model-ready' : ''}`} key={model.id}>
+                  <div className="setup-model-icon">{model.id === 'singing' ? <AudioLines size={18} /> : model.id === 'demucs' ? <Headphones size={18} /> : <FileText size={18} />}</div>
+                  <div className="setup-model-main">
+                    <div className="setup-model-heading"><div><b>{model.name}</b><span>{model.description}</span></div><i className={model.ready ? 'ready' : busy ? 'busy' : ''}>{model.ready ? '已就绪' : busy ? (uploading ? '正在接收' : '正在下载') : model.status === 'failed' ? '需重试' : '待安装'}</i></div>
+                    {!model.ready && <div className="setup-model-progress"><span style={{ width: `${busy ? Math.max(3, progress) : 0}%` }} /></div>}
+                    {busy && <small className="setup-model-message">{uploading ? `上传进度 ${Math.round(progress)}%` : model.message || `下载进度 ${Math.round(progress)}%`}</small>}
+                    {model.error && !busy && <small className="setup-model-error">{model.error}</small>}
+                    <div className="setup-model-meta"><span>{model.size}</span><span>安装到 <code>{model.path}</code></span><a href={model.source_url} target="_blank" rel="noreferrer">官方来源 <ChevronRight size={11} /></a></div>
+                    <div className="setup-model-actions">
+                      {!model.ready && <button className="button button-primary" onClick={() => void downloadSetupModel(model)} disabled={busy || setupActionId !== ''}>{busy && !uploading ? <LoaderCircle size={13} className="spin" /> : <Download size={13} />}下载官方权重</button>}
+                      <label className={`button button-quiet setup-upload-button ${busy || setupActionId !== '' ? 'disabled' : ''}`}>
+                        {uploading ? <LoaderCircle size={13} className="spin" /> : <Upload size={13} />}{model.ready ? '替换本地文件' : '手动上传'}
+                        <input type="file" accept={accepted} disabled={busy || setupActionId !== ''} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void uploadSetupModel(model, file); }} />
+                      </label>
+                      {!model.ready && <small className="setup-upload-hint">{uploadHint}</small>}
+                    </div>
+                  </div>
+                </article>;
+              })}
+            </div>
+            <div className="setup-footer"><span>模型权重保存在 <code>{setupModels.model_root}</code>，可通过挂载目录备份。</span><button className="text-button" onClick={closeSettings}>{setupModels.ready ? '完成' : '稍后设置'}</button></div>
+          </>}
         </section>
       </div>}
     </div>

@@ -19,12 +19,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parent
-PLUS_ROOT = Path(
-    os.environ.get("YINGMUSIC_PLUS_ROOT", ROOT.parent / "YingMusic-Singer-Plus")
-).resolve()
+import model_assets
+
+PLUS_ROOT = model_assets.PLUS_ROOT
 PLUS_SITE_PACKAGES = PLUS_ROOT / ".venv" / "Lib" / "site-packages"
-PLUS_HF_HOME = PLUS_ROOT / "pretrained_models" / "hf_home"
-PLUS_HF_CACHE = PLUS_HF_HOME / "hub"
+PLUS_HF_HOME = Path(os.environ.get("HF_HOME", PLUS_ROOT / "pretrained_models" / "hf_home"))
+PLUS_HF_CACHE = Path(os.environ.get("HF_HUB_CACHE", PLUS_HF_HOME / "hub"))
 PLUS_ESPEAK_DIR = PLUS_ROOT / "pretrained_models" / "espeak-ng-local" / "eSpeak NG"
 PLUS_MODEL_ID = "ASLP-lab/YingMusic-Singer-Plus"
 SINGING_MODEL_NAME = "YingMusic-Singer-Plus"
@@ -51,7 +51,7 @@ from demucs.apply import apply_model as apply_demucs
 from demucs.pretrained import get_model as get_demucs_model
 
 
-OUTPUT_ROOT = ROOT / "outputs" / "sessions"
+OUTPUT_ROOT = model_assets.DATA_ROOT / "sessions"
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 CHECKPOINT_DIR = ROOT / "ckpts"
 DEMUCS_SAMPLE_RATE = 44_100
@@ -191,8 +191,10 @@ def _transcribe_lyrics(
             if dll_path.is_dir():
                 dll_directory = os.add_dll_directory(str(dll_path))
         progress(0.77, "加载本地 Whisper large-v3 歌词识别模型")
+        if not model_assets.whisper_model_ready():
+            raise WorkflowError("请先在设置中下载 Whisper large-v3，或上传本地模型 ZIP。")
         model = WhisperModel(
-            "large-v3",
+            model_assets.active_whisper_model(),
             device=DEVICE,
             compute_type="float16" if DEVICE == "cuda" else "int8",
             download_root=str(CHECKPOINT_DIR / "faster-whisper"),
@@ -287,6 +289,8 @@ def _separate_stems(
     """Run one htdemucs pass, keeping the separator off GPU after the job."""
     global _demucs_model
     if _demucs_model is None:
+        if not model_assets.demucs_model_ready():
+            raise WorkflowError("请先在设置中下载 htdemucs 权重，或上传本地检查点。")
         _demucs_model = get_demucs_model("htdemucs").eval()
 
     if progress:
@@ -384,8 +388,10 @@ def _get_singer() -> Any:
                     _configure_plus_runtime()
                     from src.YingMusicSinger.infer.YingMusicSinger import YingMusicSinger
 
+                    if not model_assets.plus_model_ready():
+                        raise WorkflowError("请先在设置中下载 YingMusic-Singer-Plus 权重，或上传本地模型文件。")
                     _singer = YingMusicSinger.from_pretrained(
-                        PLUS_MODEL_ID,
+                        model_assets.active_plus_model(),
                         cache_dir=str(PLUS_HF_CACHE),
                         local_files_only=True,
                         model_cfg_path=str(

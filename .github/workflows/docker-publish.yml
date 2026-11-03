@@ -1,0 +1,74 @@
+name: Build Docker image and deployment bundle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tags and labels
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/huddle-up-forge/song-of-theseus
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and publish GPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha,scope=song-of-theseus
+          cache-to: type=gha,scope=song-of-theseus,mode=max
+
+      - name: Build one-click deployment bundle
+        run: |
+          cd deploy
+          zip -j ../song-of-theseus-deploy.zip compose.yaml deploy.bat stop.bat deploy.sh README.md
+
+      - name: Upload deployment bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: song-of-theseus-deploy
+          path: song-of-theseus-deploy.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the latest deployment bundle
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: deploy-latest
+          name: Song of Theseus — Deployment Bundle
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          files: song-of-theseus-deploy.zip
