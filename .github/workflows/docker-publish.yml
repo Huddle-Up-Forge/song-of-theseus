@@ -36,18 +36,40 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build and publish GPU image
-        uses: docker/build-push-action@v6
+        id: docker-build
+        env:
+          IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
+          IMAGE_LABELS: ${{ steps.metadata.outputs.labels }}
+        run: |
+          set -o pipefail
+          tag_args=()
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tag_args+=(--tag "$tag")
+          done <<< "$IMAGE_TAGS"
+          label_args=()
+          while IFS= read -r label; do
+            [[ -n "$label" ]] && label_args+=(--label "$label")
+          done <<< "$IMAGE_LABELS"
+          docker buildx build \
+            --progress=plain \
+            --platform linux/amd64 \
+            --push \
+            --file Dockerfile \
+            --build-arg "VCS_REF=${GITHUB_SHA}" \
+            --cache-from type=gha,scope=song-of-theseus \
+            --cache-to type=gha,scope=song-of-theseus,mode=max \
+            "${tag_args[@]}" \
+            "${label_args[@]}" \
+            . 2>&1 | tee docker-build.log
+
+      - name: Save Docker build log on failure
+        if: failure() && steps.docker-build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          build-args: |
-            VCS_REF=${{ github.sha }}
-          cache-from: type=gha,scope=song-of-theseus
-          cache-to: type=gha,scope=song-of-theseus,mode=max
+          name: docker-build-log
+          path: docker-build.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Build one-click deployment bundle
         run: |
