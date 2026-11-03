@@ -412,13 +412,16 @@ def _run_plus_inference(
     target_text: str,
     steps: int,
     seed: int,
+    *,
+    ref_audio_path: str | Path | None = None,
+    ref_text: str | None = None,
 ) -> np.ndarray:
     """Run Plus inference and return float32 stereo audio at 44.1 kHz."""
     singer = _get_singer()
     waveform, sample_rate = singer(
-        ref_audio_path=str(project["prompt_path"]),
+        ref_audio_path=str(ref_audio_path or project["prompt_path"]),
         melody_audio_path=str(melody_audio_path),
-        ref_text=str(project["prompt_text"]),
+        ref_text=str(ref_text if ref_text is not None else project["prompt_text"]),
         target_text=target_text.strip(),
         lrc_align_mode="sentence_level",
         sil_len_to_end=0.5,
@@ -442,6 +445,80 @@ def _run_plus_inference(
             int(sample_rate), DEMUCS_SAMPLE_RATE
         )(audio)
     return audio.numpy().T.astype(np.float32, copy=False)
+
+
+def _line_voice_reference(project: dict[str, Any], index: int) -> tuple[Path, str]:
+    """Use the current source lyric line as its own timbre reference by default.
+
+    An explicitly selected singer profile remains the project-wide reference.
+    Projects without an original vocal track (such as standalone MIDI projects)
+    also fall back to their configured reference.
+    """
+    prompt_path = Path(project["prompt_path"])
+    prompt_text = str(project["prompt_text"])
+    if project.get("singer_profile"):
+        return prompt_path, prompt_text
+
+    segments = project.get("segments", [])
+    vocals_path = project.get("vocals_path")
+    if index < 0 or index >= len(segments) or not vocals_path:
+        return prompt_path, prompt_text
+
+    segment = segments[index]
+    original_text = str(segment.get("original", "")).strip()
+    if not original_text or not Path(vocals_path).is_file():
+        return prompt_path, prompt_text
+
+    reference_path = Path(project["session_dir"]) / "voice_references" / f"line_{index + 1:04d}.wav"
+    reference_path.parent.mkdir(parents=True, exist_ok=True)
+    start = max(0.0, float(segment["start"]))
+    end = min(float(project["duration"]), float(segment["end"]))
+    if end <= start:
+        return prompt_path, prompt_text
+
+    with sf.SoundFile(vocals_path) as vocals_file:
+        first_sample = min(vocals_file.frames, int(round(start * vocals_file.samplerate)))
+        last_sample = min(vocals_file.frames, int(round(end * vocals_file.samplerate)))
+        if last_sample - first_sample < int(0.3 * vocals_file.samplerate):
+            return prompt_path, prompt_text
+        vocals_file.seek(first_sample)
+        reference_audio = vocals_file.read(
+            last_sample - first_sample, dtype="float32", always_2d=True
+        )
+        sample_rate = vocals_file.samplerate
+
+    # LRC end times are the next line's start, so a line can include a long
+    # instrumental gap. Keep the source phrase and its natural tail, but don't
+    # feed that entire gap as a voice prompt. The lyric-length cap protects
+    # unusually long LRC intervals while the RMS edge catches shorter phrases.
+    frame_size = max(1, int(round(sample_rate * 0.08)))
+    mono = reference_audio.mean(axis=1)
+    rms = np.asarray(
+        [
+            float(np.sqrt(np.mean(mono[offset : offset + frame_size] ** 2)))
+            for offset in range(0, len(mono), frame_size)
+        ],
+        dtype=np.float32,
+    )
+    peak_rms = float(rms.max(initial=0.0))
+    active_frames = np.flatnonzero(rms > max(peak_rms * 0.035, 0.0008))
+    active_end = (
+        min(len(reference_audio), int((active_frames[-1] + 1) * frame_size + 0.35 * sample_rate))
+        if len(active_frames)
+        else len(reference_audio)
+    )
+    lyric_units = max(1, sum(char.isalnum() for char in original_text))
+    lyric_length_cap = int(min(12.0, max(2.5, lyric_units * 0.7 + 0.6)) * sample_rate)
+    minimum_reference = min(len(reference_audio), int(2.5 * sample_rate))
+    reference_length = min(
+        len(reference_audio),
+        lyric_length_cap,
+        max(minimum_reference, active_end),
+    )
+    reference_audio = reference_audio[:reference_length]
+
+    sf.write(reference_path, reference_audio, DEMUCS_SAMPLE_RATE, subtype="PCM_16")
+    return reference_path, original_text
 
 
 def prepare_session(
@@ -955,6 +1032,11 @@ def _generate_vocal_segment(
         melody_segment = guide[..., :target_length].numpy().T.astype(np.float32, copy=False)
     sf.write(melody_path, melody_segment, DEMUCS_SAMPLE_RATE, subtype="PCM_16")
 
+    # Keep the voice identity and lyric conditioning tied to this source line.
+    # The melody guide can be pitch-shifted or chunked, so build the voice
+    # reference from the unmodified full source line instead.
+    ref_audio_path, ref_text = _line_voice_reference(project, index)
+
     if progress:
         progress(0.10, f"第 {index + 1} 句：准备 Plus 旋律和音色参考")
         progress(0.15, f"第 {index + 1} 句：Plus GPU 歌声扩散采样（{steps} 步）")
@@ -964,6 +1046,8 @@ def _generate_vocal_segment(
         lyrics,
         steps,
         seed=2025 + index + seed_offset,
+        ref_audio_path=ref_audio_path,
+        ref_text=ref_text,
     )
     if len(result) > target_length:
         result = result[:target_length]
