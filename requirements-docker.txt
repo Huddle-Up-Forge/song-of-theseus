@@ -10,4 +10,5 @@ x-transformers==2.1.2
 vector-quantize-pytorch==1.23.2
 alias-free-torch==0.0.6
 einops==0.8.1
+einops-exts==0.0.4
 transformers==4.57.6
